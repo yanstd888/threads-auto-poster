@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx tsc --noEmit --pretty false
+      - run: npx tsx check-content-and-schedule.ts
+      - run: npm run build
+      - run: npm audit --omit=dev --audit-level=high
+      - name: Secret filename guard
+        run: |
+          test ! -e .env
+          test ! -e .env.local
+          ! git ls-files | grep -E '(^|/)\.env$|(^|/)\.env\.(local|development|production)$|(^|/).*(\.(pem|key|p12)$|\.db(-wal|-shm)?$)'
+      - name: Secret pattern guard
+        run: |
+          ! git grep -nEI '(api[_-]?key|access[_-]?token|client[_-]?secret|password)[[:space:]]*[:=][[:space:]]*["'"'"']?[A-Za-z0-9_+/=-]{20,}' -- ':!*.md' ':!*.example'

@@ -1,0 +1,23 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*.*.*']
+
+permissions:
+  contents: read
+
+jobs:
+  verify-and-package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx tsc --noEmit --pretty false
+      - run: npx tsx check-content-and-schedule.ts
+      - run: npm run build
+      - run: docker build --tag threads-auto-poster:${GITHUB_REF_NAME} .
