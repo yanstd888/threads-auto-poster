@@ -168,9 +168,13 @@ export async function DELETE(req: NextRequest) {
   return NextResponse.json({ success: true });
 }
 
-async function checkSource(url: string): Promise<{ status: 'live' | 'transient' | 'dead' | 'redirect'; httpStatus: number | null; bytes: number | null; error: string | null }> {
+export async function checkSource(url: string): Promise<{ status: 'live' | 'transient' | 'dead' | 'redirect'; httpStatus: number | null; bytes: number | null; error: string | null }> {
   try {
-    const response = await fetch(url, { method: 'HEAD', redirect: 'manual', signal: AbortSignal.timeout(8_000) });
+    let response = await fetch(url, { method: 'HEAD', redirect: 'manual', signal: AbortSignal.timeout(8_000) });
+    if (response.status === 403 || response.status === 405) {
+      response = await fetch(url, { method: 'GET', headers: { Range: 'bytes=0-4095' }, redirect: 'manual', signal: AbortSignal.timeout(8_000) });
+      await response.body?.cancel();
+    }
     const status = response.status >= 300 && response.status < 400 ? 'redirect' : response.status >= 500 || response.status === 429 ? 'transient' : response.ok ? 'live' : 'dead';
     return { status, httpStatus: response.status, bytes: null, error: null };
   } catch (error) {

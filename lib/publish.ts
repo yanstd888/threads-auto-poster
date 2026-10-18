@@ -1,8 +1,9 @@
-import { getDb, logAudit } from './db';
+import { getDb, getSetting, logAudit } from './db';
 import { claimPostForPublishing } from './publish-claim';
 import { postToThreads } from './threads-api';
 
 export type PublishStoredPostResult =
+  | { kind: 'disabled' }
   | { kind: 'posted'; id: string; url: string; verified: boolean }
   | { kind: 'already_posted'; id: string | null; url: string | null }
   | { kind: 'publishing' }
@@ -10,7 +11,12 @@ export type PublishStoredPostResult =
   | { kind: 'not_found' }
   | { kind: 'failed'; error: string; retryable: boolean };
 
+export function isPublishingDisabled(killSwitch: string | null): boolean {
+  return killSwitch === 'true';
+}
+
 export async function publishStoredPost(postId: number, allowedStatuses: string[]): Promise<PublishStoredPostResult> {
+  if (isPublishingDisabled(getSetting('kill_switch'))) return { kind: 'disabled' };
   const db = getDb();
   const claim = claimPostForPublishing(db, postId, allowedStatuses);
 

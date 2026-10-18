@@ -1,19 +1,25 @@
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import { ensureNaturalQuestionCta, formatPostText, normalizePillarHashtags, runQualityGate, splitOverlongThreadParts } from './lib/quality-gate';
-import { buildPrompt, parseHermesOutput } from './lib/hermes';
+import { buildPrompt, normalizeHermesInvocationConfig, parseHermesOutput } from './lib/hermes';
 import { getContentStrategy } from './lib/content-strategy';
-import { getContentPillars, seedDefaultContentPillars } from './lib/content-pillars';
+import { getContentPillars, normalizeContentPillarWeights, seedDefaultContentPillars } from './lib/content-pillars';
 import { getContentCompositions, getContentComposition, seedDefaultContentCompositions } from './lib/content-compositions';
 import { pruneExpiredSourceSnapshots, readLimitedResponseText, saveSourceSnapshot, selectSourceFetchBatches, selectSourcesForContext, sourceResponseHealth } from './lib/source-context';
-import { availablePreparationWorkers, classifyPreparationError, contentPreparationRetryDelayMs, getDailySlotCapacity, getNextMissedScheduledSlot, getNextPreparationSlot, isBlockedSourceError, MIN_SCHEDULE_GAP_MINUTES, planDailyPillars, planDailySlotTimes, recoverStalePreparations } from './lib/scheduler';
+import { availablePreparationWorkers, classifyPreparationError, contentPreparationRetryDelayMs, getDailySlotCapacity, getNextMissedScheduledSlot, getNextPreparationSlot, isBlockedSourceError, MIN_SCHEDULE_GAP_MINUTES, planDailyPillars, planDailySlotTimes, recoverStalePreparations, shouldRetryPreparationUntilSlot } from './lib/scheduler';
 import { claimPostForPublishing } from './lib/publish-claim';
+import { isPublishingDisabled } from './lib/publish';
 import { createThreadsContainerUrl, shouldRefreshThreadsToken } from './lib/threads-api';
 import { captureDueSnapshots } from './lib/metrics';
 import { reservePrimarySource, releasePrimarySourceReservation } from './lib/content-history';
 import { applyConfigImport, createConfigExport, validateConfigImport } from './lib/config-transfer';
+import { ALLOWED_SETTING_KEYS } from './lib/settings-validation';
+import { APP_VERSION_LABEL } from './lib/app-version';
 
 const requiredKeywords = ['repo GitHub terbaik', 'repository open source', 'tools developer gratis'];
+assert.equal(ALLOWED_SETTING_KEYS.has('github_url'), false);
+assert.equal(ALLOWED_SETTING_KEYS.has('website_url'), false);
+assert.match(APP_VERSION_LABEL, /^v\d+\.\d+\.\d+$/);
 const resourceUrl = 'https://github.com/public-apis/public-apis';
 const quality = runQualityGate({
   text: `3 repo GitHub terbaik untuk dicoba kalau kamu butuh repository open source dan tools developer gratis. ${resourceUrl} Repo mana yang paling berguna untuk workflow-mu? #opensource`,
@@ -231,6 +237,8 @@ const pillarDb = new DatabaseSync(':memory:');
 pillarDb.exec(`CREATE TABLE content_pillars (slug TEXT PRIMARY KEY, name TEXT NOT NULL, enabled INTEGER NOT NULL, weight INTEGER NOT NULL, locale TEXT NOT NULL, source_policy TEXT NOT NULL, promo_eligible INTEGER NOT NULL, position INTEGER NOT NULL)`);
 seedDefaultContentPillars(pillarDb);
 pillarDb.prepare("INSERT INTO content_pillars (slug, name, enabled, weight, locale, source_policy, promo_eligible, position) VALUES ('custom', 'Custom Topic', 1, 10, 'en', 'any', 1, 4)").run();
+normalizeContentPillarWeights(pillarDb);
+assert.equal(getContentPillars(pillarDb).filter(pillar => pillar.enabled).reduce((sum, pillar) => sum + pillar.weight, 0), 100);
 const customPillar = getContentPillars(pillarDb).find(pillar => pillar.slug === 'custom');
 assert.equal(customPillar?.locale, 'en');
 assert.equal(customPillar?.promo_eligible, true);
@@ -261,6 +269,12 @@ assert.equal(classifyPreparationError('source timeout'), 'source_transient');
 assert.equal(classifyPreparationError('invalid_json'), 'invalid_json');
 assert.equal(classifyPreparationError('quality_gate'), 'quality_reject');
 assert.equal(classifyPreparationError('source_transient: GitHub resource unavailable'), 'source_transient');
+assert.deepEqual(normalizeHermesInvocationConfig('THREADS', 'yanstd-v1'), { model: 'THREADS', provider: 'yanstd-v1' }, 'THREADS must reach Hermes as an explicit model argument');
+assert.ok(normalizeHermesInvocationConfig('THREADS', 'cli').error, 'placeholder provider must fail before generation starts');
+assert.equal(shouldRetryPreparationUntilSlot('agent_crash'), true);
+assert.equal(shouldRetryPreparationUntilSlot('invalid_json'), true);
+assert.equal(shouldRetryPreparationUntilSlot('source_transient'), true);
+assert.equal(shouldRetryPreparationUntilSlot('source_dead'), false);
 assert.equal(isBlockedSourceError('Semua tema/sumber utama untuk pilar ini sudah dipakai dalam 14 hari terakhir'), true);
 const sourceFixtures = [
   { id: 1, name: 'Required repo', url: 'https://github.com/acme/repo', source_type: 'repository' },
@@ -305,6 +319,10 @@ assert.equal(parseHermesOutput('session_id: orphaned-footer', {
   pillar: 'AI agent skill terbaik', postType: 'education', language: 'id', style: 'casual', softSelling: false,
   keywords: ['AI agent'], avoidTopics: [], sources: ['https://example.com'], maxLength: 500,
 }).error, 'Hermes output tidak berisi JSON konten yang valid');
+assert.equal(parseHermesOutput('{"text":"   ","replies":[]}', {
+  pillar: 'AI agent skill terbaik', postType: 'education', language: 'id', style: 'casual', softSelling: false,
+  keywords: ['AI agent'], avoidTopics: [], sources: ['https://example.com'], maxLength: 500,
+}).error, 'Hermes output tidak berisi JSON konten yang valid');
 
 const db = new DatabaseSync(':memory:');
 db.exec('CREATE TABLE audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT, action TEXT NOT NULL, details TEXT, created_at INTEGER NOT NULL)');
@@ -322,6 +340,8 @@ db.exec(`CREATE TABLE posts (
 db.prepare("INSERT INTO posts (id, content, status) VALUES (1, 'test', 'draft')").run();
 assert.equal(claimPostForPublishing(db, 1, ['draft']).kind, 'claimed');
 assert.equal(claimPostForPublishing(db, 1, ['draft']).kind, 'publishing');
+assert.equal(isPublishingDisabled('true'), true, 'kill switch must block every publish path');
+assert.equal(isPublishingDisabled('false'), false);
 db.prepare("INSERT INTO posts (id, content, status) VALUES (2, 'retry', 'failed')").run();
 assert.equal(claimPostForPublishing(db, 2, ['failed']).kind, 'claimed');
 assert.equal(claimPostForPublishing(db, 2, ['failed']).kind, 'publishing');
@@ -348,6 +368,8 @@ assert.equal(getNextPreparationSlot(db, 1_000)?.id, 2, 'next day is eligible onl
 db.prepare("INSERT INTO schedule (id, slot_time, status, retry_at) VALUES (5, ?, 'pending', NULL)").run(1_000 + 48 * 60 * 60_000 + 1);
 db.prepare("INSERT INTO posts (id, content, status, schedule_id) VALUES (6, 'ready', 'scheduled', 2)").run();
 assert.equal(getNextPreparationSlot(db, 1_000), null, 'preparation must not drain slots beyond the 48h horizon');
+db.prepare("INSERT INTO schedule (id, slot_time, status, retry_at) VALUES (7, ?, 'pending', NULL)").run(1_000 - 60 * 60 * 1000);
+assert.equal(getNextPreparationSlot(db, 1_000)?.id, 7, 'overdue pending slots must resume within the preparation lookback window');
 db.exec('CREATE TABLE scheduler_locks (name TEXT PRIMARY KEY, locked_at INTEGER NOT NULL)');
 db.prepare("INSERT INTO schedule (id, slot_time, pillar, status, retry_at) VALUES (3, 50_000, 'umkm', 'preparing', NULL), (4, 50_000, 'ai', 'preparing', NULL)").run();
 db.prepare("INSERT INTO scheduler_locks (name, locked_at) VALUES ('content-preparation:umkm', 1), ('content-preparation:ai', 20_000)").run();

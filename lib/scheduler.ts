@@ -1,4 +1,5 @@
 import * as cron from 'node-cron';
+import type { ScheduledTask } from 'node-cron';
 import type { DatabaseSync } from 'node:sqlite';
 import { getDb, getSetting, setSetting, logAudit } from './db';
 import { publishStoredPost } from './publish';
@@ -22,12 +23,39 @@ interface ScheduleConfig {
   timezone: string;
 }
 
-const DEFAULT_TIMEZONE = 'Asia/Jakarta';
+interface ScheduleRow {
+  id: number;
+  slot_time: number;
+  pillar: string;
+  post_type: 'education' | 'promotion';
+  status: string;
+  retry_count: number;
+  retry_at: number | null;
+  last_error: string | null;
+  post_id?: number | null;
+  post_status?: string | null;
+  quality_status?: string | null;
+  threads_id?: string | null;
+}
+
+interface PostRow { id: number; status: string; quality_status: string }
+interface PreparingRow { id: number; pillar: string; post_type: string; slot_time: number }
+interface AuditRow { action: string; details: string; created_at: number }
+interface SchedulerStatusRow extends ScheduleRow {
+  content: string | null;
+  replies: string | null;
+  source_urls: string | null;
+  quality_reasons: string | null;
+  threads_url: string | null;
+}
+
+const DEFAULT_TIMEZONE = 'UTC';
 const DEFAULT_ACTIVE_DAYS = [0, 1, 2, 3, 4, 5, 6];
 const PLAN_VERSION = 'stable-v4-dynamic-pillar-mix';
 const PLANNING_DAYS = 7;
 const TIMER_HORIZON_MS = 24 * 60 * 60 * 1000;
 const PREPARATION_HORIZON_MS = 48 * 60 * 60 * 1000;
+const PREPARATION_LOOKBACK_MS = 24 * 60 * 60 * 1000;
 const DAY_PEAK_MINUTES = [11 * 60, 12 * 60, 10 * 60, 12 * 60, 9 * 60, 10 * 60, 10 * 60];
 
 const PREPARATION_HEARTBEAT_MS = 5_000;
@@ -46,7 +74,7 @@ export const MAX_POSTS_PER_DAY = Number.isInteger(configuredMaxPosts) && configu
   : DEFAULT_MAX_POSTS_PER_DAY;
 const SCHEDULER_STARTED_KEY = '__threadsAutoPosterSchedulerStarted';
 
-let cronJobs: any[] = [];
+let cronJobs: ScheduledTask[] = [];
 const slotTimers = new Map<number, ReturnType<typeof setTimeout>>();
 const contentPreparationTimers = new Map<string, ReturnType<typeof setTimeout>>();
 let missedSlotCatchupTimer: ReturnType<typeof setTimeout> | null = null;
@@ -287,10 +315,10 @@ async function recoverInterruptedSlots() {
     LEFT JOIN posts p ON p.schedule_id = s.id AND p.status <> 'quality_failed'
     WHERE s.slot_time BETWEEN ? AND ? AND s.status IN ('preparing', 'processing')
     ORDER BY s.slot_time ASC
-  `).all(now - MISSED_SLOT_CATCHUP_WINDOW_MS, now) as any[];
+  `).all(now - MISSED_SLOT_CATCHUP_WINDOW_MS, now) as unknown as ScheduleRow[];
 
   for (const slot of slots) {
-    if (slot.post_status === 'publishing') {
+    if (slot.post_status === 'publishing' && slot.post_id != null) {
       // ponytail: a killed process may have reached Meta; require read-back/manual resolution rather than risk a duplicate post.
       db.prepare("UPDATE posts SET status = 'publish_unknown' WHERE id = ? AND status = 'publishing'").run(slot.post_id);
       db.prepare("UPDATE schedule SET status = 'failed', last_error = ? WHERE id = ?").run('App restarted while publishing; verify before retry.', slot.id);
@@ -325,7 +353,7 @@ async function runMissedSlotCatchup() {
   scheduleMissedSlotCatchup();
 }
 
-export function getNextMissedScheduledSlot(db: DatabaseSync, now = Date.now()): any | null {
+export function getNextMissedScheduledSlot(db: DatabaseSync, now = Date.now()): ScheduleRow | null {
   const slot = db.prepare(`
     SELECT s.*
     FROM schedule s
@@ -337,7 +365,7 @@ export function getNextMissedScheduledSlot(db: DatabaseSync, now = Date.now()): 
       AND p.threads_id IS NULL
     ORDER BY s.slot_time ASC, p.id ASC
     LIMIT 1
-  `).get(now - MISSED_SLOT_CATCHUP_WINDOW_MS, now) as any;
+  `).get(now - MISSED_SLOT_CATCHUP_WINDOW_MS, now) as ScheduleRow | undefined;
   return slot || null;
 }
 
@@ -345,7 +373,7 @@ function armPendingSlots() {
   const now = Date.now();
   const pendingSlots = getDb().prepare(
     "SELECT * FROM schedule WHERE status = 'pending' AND slot_time > ? AND slot_time <= ? ORDER BY slot_time ASC",
-  ).all(now, now + TIMER_HORIZON_MS) as any[];
+  ).all(now, now + TIMER_HORIZON_MS) as unknown as ScheduleRow[];
 
   for (const slot of pendingSlots) {
     const delay = slot.slot_time - now;
@@ -370,6 +398,7 @@ function queueContentPreparation(pillar: string, delayMs = 0) {
 function scheduleNextContentPreparation() {
   const db = getDb();
   const now = Date.now();
+  if (getSetting('kill_switch') === 'true' || getSetting('content_agent_enabled') === 'false') return;
   const available = availablePreparationWorkers(db, contentPreparationTimers.size, now);
   if (available === 0) return;
   const activePillars = new Set((db.prepare("SELECT substr(name, length('content-preparation:') + 1) AS pillar FROM scheduler_locks WHERE name LIKE 'content-preparation:%' AND locked_at >= ?")
@@ -377,7 +406,8 @@ function scheduleNextContentPreparation() {
   const candidates = getContentPillars(db, true)
     .map(pillar => pillar.slug)
     .map(pillar => getNextPreparationSlot(db, now, pillar))
-    .filter((slot): slot is any => Boolean(slot) && !activePillars.has(slot.pillar) && !contentPreparationTimers.has(slot.pillar))
+    .filter((slot): slot is ScheduleRow => slot !== null)
+    .filter(slot => !activePillars.has(slot.pillar) && !contentPreparationTimers.has(slot.pillar))
     .sort((a, b) => a.slot_time - b.slot_time)
     .slice(0, available);
   for (const slot of candidates) {
@@ -393,7 +423,7 @@ export function availablePreparationWorkers(db: DatabaseSync, queuedWorkers = 0,
 }
 
 // ponytail: one worker per pillar; increase MAX_PREPARATION_WORKERS only when the agent/provider has measured spare capacity.
-export function getNextPreparationSlot(db: DatabaseSync, now: number, pillar?: string): any | null {
+export function getNextPreparationSlot(db: DatabaseSync, now: number, pillar?: string): ScheduleRow | null {
   const pillarFilter = pillar ? 'AND s.pillar = ?' : '';
   const slot = db.prepare(`
     SELECT s.* FROM schedule s
@@ -403,7 +433,7 @@ export function getNextPreparationSlot(db: DatabaseSync, now: number, pillar?: s
         SELECT 1 FROM posts p WHERE p.schedule_id = s.id AND p.status <> 'quality_failed'
       )
     ORDER BY s.slot_time ASC LIMIT 1
-  `).get(now, now + PREPARATION_HORIZON_MS, ...(pillar ? [pillar] : [])) as any;
+  `).get(now - PREPARATION_LOOKBACK_MS, now + PREPARATION_HORIZON_MS, ...(pillar ? [pillar] : [])) as ScheduleRow | undefined;
   return slot || null;
 }
 
@@ -431,27 +461,26 @@ export function isBlockedSourceError(error: string): boolean {
     || error.includes('Tidak ada URL GitHub repo/skill approved');
 }
 
-function markPreparationRetry(slot: any, error: string, qualityFailure = false) {
+export function shouldRetryPreparationUntilSlot(kind: PreparationErrorKind): boolean {
+  return kind === 'source_transient' || kind === 'agent_timeout' || kind === 'agent_crash' || kind === 'invalid_json';
+}
+
+function markPreparationRetry(slot: ScheduleRow, error: string, qualityFailure = false) {
   const kind = classifyPreparationError(error);
   const labeledError = `${kind}: ${error}`;
   const db = getDb();
   const nextAttempt = (Number(slot.retry_count) || 0) + 1;
+  const retryUntilSlot = !qualityFailure && shouldRetryPreparationUntilSlot(kind);
   const maxAttempts = qualityFailure ? 2 : MAX_CONTENT_PREPARATION_ATTEMPTS;
-  const terminalStatus = qualityFailure ? 'blocked_quality' : 'failed';
-  if (nextAttempt >= maxAttempts) {
-    db.prepare("UPDATE schedule SET status = ?, retry_at = NULL, retry_count = ?, last_error = ? WHERE id = ?").run(terminalStatus, nextAttempt, labeledError, slot.id);
-    logAudit('schedule_prepare_failed', `slot ${slot.id}: attempts=${nextAttempt}: ${labeledError}`);
+  const terminalStatus = qualityFailure ? 'blocked_quality' : retryUntilSlot ? 'blocked_agent' : 'failed';
+  const retryAt = Date.now() + contentPreparationRetryDelayMs(Number(slot.retry_count) || 0);
+  if (retryAt < slot.slot_time && (retryUntilSlot || nextAttempt < maxAttempts)) {
+    db.prepare("UPDATE schedule SET status = 'retrying', retry_at = ?, retry_count = ?, last_error = ? WHERE id = ?").run(retryAt, nextAttempt, labeledError, slot.id);
+    logAudit('schedule_prepare_retry', `slot ${slot.id}: retry ${nextAttempt}${retryUntilSlot ? ' until slot' : `/${maxAttempts}`} in ${Math.round((retryAt - Date.now()) / 1000)}s: ${labeledError}`);
     return;
   }
-
-  const retryAt = Date.now() + contentPreparationRetryDelayMs(Number(slot.retry_count) || 0);
-  if (retryAt < slot.slot_time) {
-    db.prepare("UPDATE schedule SET status = 'retrying', retry_at = ?, retry_count = ?, last_error = ? WHERE id = ?").run(retryAt, nextAttempt, labeledError, slot.id);
-    logAudit('schedule_prepare_retry', `slot ${slot.id}: retry ${nextAttempt}/${maxAttempts} in ${Math.round((retryAt - Date.now()) / 1000)}s: ${labeledError}`);
-  } else {
-    db.prepare("UPDATE schedule SET status = ?, retry_at = NULL, retry_count = ?, last_error = ? WHERE id = ?").run(terminalStatus, nextAttempt, labeledError, slot.id);
-    logAudit('schedule_prepare_failed', `slot ${slot.id}: no time left before slot: ${labeledError}`);
-  }
+  db.prepare("UPDATE schedule SET status = ?, retry_at = NULL, retry_count = ?, last_error = ? WHERE id = ?").run(terminalStatus, nextAttempt, labeledError, slot.id);
+  logAudit('schedule_prepare_failed', `slot ${slot.id}: ${retryAt < slot.slot_time ? `attempts=${nextAttempt}` : 'no time left before slot'}: ${labeledError}`);
 }
 
 async function prepareOnePendingSlot(pillar: string) {
@@ -495,15 +524,19 @@ async function prepareOnePendingSlot(pillar: string) {
       } else {
         db.prepare("UPDATE schedule SET status = 'pending', retry_at = NULL, last_error = NULL WHERE id = ?").run(slot.id);
         logAudit('schedule_prepared', `slot ${slot.id}: post=${result.postId} status=${result.status}`);
+        if (slot.slot_time <= Date.now()) {
+          const dueSlot = db.prepare('SELECT * FROM schedule WHERE id = ?').get(slot.id) as ScheduleRow | undefined;
+          if (dueSlot) await executeSlot(dueSlot, true);
+        }
       }
-    } catch (error: any) {
-      markPreparationRetry(slot, error.message);
+    } catch (error: unknown) {
+      markPreparationRetry(slot, error instanceof Error ? error.message : String(error));
     }
   } finally {
     clearInterval(heartbeat);
     db.prepare('DELETE FROM scheduler_locks WHERE name = ?').run(lockName);
     armPendingSlots();
-    scheduleNextContentPreparation();
+    if (getSetting('kill_switch') !== 'true') scheduleNextContentPreparation();
   }
 }
 
@@ -531,7 +564,7 @@ function rebalanceFutureSchedule(config: ScheduleConfig) {
     LEFT JOIN posts p ON p.schedule_id = s.id AND p.status <> 'quality_failed'
     WHERE s.slot_time >= ? AND s.slot_time < ?
     ORDER BY s.slot_time ASC
-  `).all(start, end) as any[];
+  `).all(start, end) as unknown as ScheduleRow[];
   const dayIndexes = new Map<string, number>();
   let changed = 0;
   let deletedPosts = 0;
@@ -547,7 +580,7 @@ function rebalanceFutureSchedule(config: ScheduleConfig) {
 
       const desired = selectPillarAndType(`${dayKey}:${row.slot_time}`, planDailyPillars(slotIndex + 1)[slotIndex]);
       const changedPillar = row.pillar !== desired.pillar || row.post_type !== desired.postType;
-      const protectedPost = row.post_id && (row.threads_id || ['publishing', 'posted', 'published'].includes(row.post_status));
+      const protectedPost = row.post_id && (row.threads_id || ['publishing', 'posted', 'published'].includes(row.post_status || ''));
       if (protectedPost) continue;
 
       if (row.post_id && changedPillar) {
@@ -569,7 +602,7 @@ function rebalanceFutureSchedule(config: ScheduleConfig) {
   logAudit('schedule_mix_rebalanced', `future_slots=${rows.filter(row => row.slot_time > now).length} changed=${changed} posts_reset=${deletedPosts}`);
 }
 
-async function executeSlot(slot: any, allowLateCatchup = false) {
+async function executeSlot(slot: ScheduleRow, allowLateCatchup = false) {
   if (getSetting('kill_switch') === 'true') {
     logAudit('slot_skipped', `slot ${slot.id} skipped: kill switch`);
     return;
@@ -588,7 +621,7 @@ async function executeSlot(slot: any, allowLateCatchup = false) {
 
   logAudit('slot_executing', `slot ${slot.id}: pillar=${slot.pillar} type=${slot.post_type}`);
   try {
-    let post = db.prepare("SELECT id, status, quality_status FROM posts WHERE schedule_id = ? AND status <> 'quality_failed' ORDER BY created_at DESC LIMIT 1").get(slot.id) as any;
+    let post = db.prepare("SELECT id, status, quality_status FROM posts WHERE schedule_id = ? AND status <> 'quality_failed' ORDER BY created_at DESC LIMIT 1").get(slot.id) as PostRow | undefined;
     if (!post) {
       if (getSetting('content_agent_enabled') === 'false') {
         db.prepare("UPDATE schedule SET status = 'blocked_agent' WHERE id = ?").run(slot.id);
@@ -596,7 +629,12 @@ async function executeSlot(slot: any, allowLateCatchup = false) {
       }
       const prepared = await createScheduledPost(slot);
       if ('error' in prepared) {
-        db.prepare('UPDATE schedule SET status = ? WHERE id = ?').run(prepared.error === 'blocked_source' ? 'blocked_source' : 'failed', slot.id);
+        const preparationError = prepared.error || 'agent_crash: Scheduled generation failed';
+        if (isBlockedSourceError(preparationError)) {
+          db.prepare("UPDATE schedule SET status = 'blocked_source', last_error = ? WHERE id = ?").run(preparationError, slot.id);
+        } else {
+          markPreparationRetry(slot, preparationError);
+        }
         return;
       }
       post = { id: prepared.postId, status: prepared.status, quality_status: prepared.qualityPassed ? 'passed' : 'failed' };
@@ -617,9 +655,10 @@ async function executeSlot(slot: any, allowLateCatchup = false) {
       return;
     }
     db.prepare("UPDATE schedule SET status = 'completed', last_error = NULL WHERE id = ?").run(slot.id);
-  } catch (error: any) {
-    db.prepare("UPDATE schedule SET status = 'failed' WHERE id = ?").run(slot.id);
-    logAudit('slot_error', `slot ${slot.id}: ${error.message}`);
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    markPreparationRetry(slot, message || 'agent_crash: Slot execution failed');
+    logAudit('slot_error', `slot ${slot.id}: ${message || 'unknown error'}`);
   }
 }
 
@@ -643,7 +682,7 @@ export function getSchedulerStatus() {
      LEFT JOIN posts p ON p.schedule_id = s.id AND p.status <> 'quality_failed'
      WHERE s.slot_time > ?
      ORDER BY s.slot_time ASC`,
-  ).all(Date.now() - 24 * 60 * 60 * 1000) as any[];
+  ).all(Date.now() - 24 * 60 * 60 * 1000) as unknown as SchedulerStatusRow[];
 }
 
 export function setContentAgentEnabled(enabled: boolean) {
@@ -653,8 +692,8 @@ export function setContentAgentEnabled(enabled: boolean) {
   clearContentPreparationTimer();
   if (enabled) {
     recoverStalePreparations(db);
-    db.prepare("UPDATE schedule SET status = 'pending' WHERE status = 'blocked_agent' AND slot_time > ? AND NOT EXISTS (SELECT 1 FROM posts WHERE posts.schedule_id = schedule.id AND posts.status <> 'quality_failed')").run(Date.now());
-    scheduleNextContentPreparation();
+    db.prepare("UPDATE schedule SET status = 'pending' WHERE status = 'blocked_agent' AND slot_time > ? AND NOT EXISTS (SELECT 1 FROM posts WHERE posts.schedule_id = schedule.id AND posts.status <> 'quality_failed')").run(Date.now() - PREPARATION_LOOKBACK_MS);
+    if (getSetting('kill_switch') !== 'true') scheduleNextContentPreparation();
   } else {
     cancelActiveHermesAgent();
     db.prepare("DELETE FROM scheduler_locks WHERE name LIKE 'content-preparation:%'").run();
@@ -668,14 +707,24 @@ export function getContentAgentStatus() {
   const db = getDb();
   recoverStalePreparations(db);
   const enabled = getSetting('content_agent_enabled') !== 'false';
+  const blockedByKillSwitch = getSetting('kill_switch') === 'true';
   const locks = db.prepare("SELECT locked_at FROM scheduler_locks WHERE name LIKE 'content-preparation:%'").all() as { locked_at: number }[];
-  const running = enabled && locks.some(lock => Date.now() - lock.locked_at < PREPARATION_STALE_MS);
-  const preparing = running ? db.prepare("SELECT id, pillar, post_type, slot_time FROM schedule WHERE status = 'preparing' ORDER BY slot_time LIMIT 1").get() as any : null;
+  const running = enabled && !blockedByKillSwitch && locks.some(lock => Date.now() - lock.locked_at < PREPARATION_STALE_MS);
+  const preparing = running ? db.prepare("SELECT id, pillar, post_type, slot_time FROM schedule WHERE status = 'preparing' ORDER BY slot_time LIMIT 1").get() as PreparingRow | undefined : undefined;
   const now = Date.now();
-  const queued = db.prepare("SELECT COUNT(*) AS count FROM schedule s WHERE s.slot_time > ? AND s.slot_time <= ? AND s.status IN ('pending','retrying','preparing') AND NOT EXISTS (SELECT 1 FROM posts p WHERE p.schedule_id = s.id AND p.status <> 'quality_failed')").get(now, now + PREPARATION_HORIZON_MS) as { count: number };
+  const queued = db.prepare("SELECT COUNT(*) AS count FROM schedule s WHERE s.slot_time > ? AND s.slot_time <= ? AND s.status IN ('pending','retrying','preparing') AND NOT EXISTS (SELECT 1 FROM posts p WHERE p.schedule_id = s.id AND p.status <> 'quality_failed')").get(now - PREPARATION_LOOKBACK_MS, now + PREPARATION_HORIZON_MS) as { count: number };
   const ready = db.prepare("SELECT COUNT(*) AS count FROM schedule s JOIN posts p ON p.schedule_id=s.id WHERE s.slot_time > ? AND p.quality_status='passed'").get(Date.now()) as { count: number };
-  const latest = db.prepare("SELECT action, details, created_at FROM audit_log WHERE action IN ('hermes_invoke','hermes_response','schedule_prepared','schedule_prepare_retry','schedule_prepare_failed','content_agent') ORDER BY id DESC LIMIT 1").get() as any;
-  return { active: enabled, running, phase: !enabled ? 'inactive' : preparing ? 'preparing' : queued.count > 0 ? 'queued' : 'idle', preparing: preparing || null, queued: queued.count, ready: ready.count, latest: latest || null };
+  const latest = db.prepare("SELECT action, details, created_at FROM audit_log WHERE action IN ('hermes_invoke','hermes_response','schedule_prepared','schedule_prepare_retry','schedule_prepare_failed','content_agent') ORDER BY id DESC LIMIT 1").get() as AuditRow | undefined;
+  return {
+    active: enabled,
+    running,
+    blocked: blockedByKillSwitch,
+    phase: !enabled ? 'inactive' : blockedByKillSwitch ? 'blocked' : preparing ? 'preparing' : queued.count > 0 ? 'queued' : 'idle',
+    preparing: preparing || null,
+    queued: queued.count,
+    ready: ready.count,
+    latest: latest || null,
+  };
 }
 
 function getScheduleConfig(): ScheduleConfig {

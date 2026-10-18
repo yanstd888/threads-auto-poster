@@ -145,7 +145,7 @@ export async function postToThreads(post: { text: string; replies: string[]; top
       return { error, safeToRetry: true };
     }
 
-    const fallbackUrl = `https://www.threads.net/@${meData.username || getSetting('threads_username') || 'user'}/post/${publishData.id}`;
+    const fallbackUrl = `https://www.threads.net/@${meData.username || getSetting('threads_username') || 'your_threads_username'}/post/${publishData.id}`;
     const verifyUrl = new URL(`${THREADS_API_BASE}/${publishData.id}`);
     verifyUrl.searchParams.set('fields', 'id,permalink');
     verifyUrl.searchParams.set('access_token', accessToken);

@@ -3,7 +3,7 @@ import type { NextRequest } from 'next/server';
 
 const TOKEN_NAME = 'auth-token';
 
-export function middleware(req: NextRequest) {
+export function proxy(req: NextRequest) {
   const token = req.cookies.get(TOKEN_NAME)?.value;
 
   // API routes handle their own auth verification (Node.js runtime)

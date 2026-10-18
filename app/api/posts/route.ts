@@ -5,6 +5,21 @@ import { createManualDraftPost } from '@/lib/schedule-content';
 import { publishStoredPost, type PublishStoredPostResult } from '@/lib/publish';
 import { saveToken } from '@/lib/threads-api';
 
+interface StoredPostRow {
+  id: number;
+  pillar: string;
+  post_type: string;
+  content: string | null;
+  replies: string | null;
+  status: string;
+  threads_url: string | null;
+  created_at: number;
+  posted_at: number | null;
+  quality_status: string | null;
+  quality_reasons: string | null;
+  retry_count: number;
+}
+
 export async function GET(req: NextRequest) {
   const session = requireAuth(req);
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -19,7 +34,7 @@ export async function GET(req: NextRequest) {
   const posts = db.prepare(`
     SELECT id, pillar, post_type, content, replies, status, threads_url, created_at, posted_at, quality_status, quality_reasons, retry_count
     FROM posts ORDER BY created_at DESC LIMIT(50)
-  `).all() as any[];
+  `).all() as unknown as StoredPostRow[];
   return NextResponse.json({
     posts: posts.map(post => ({
       id: post.id,
@@ -53,15 +68,17 @@ export async function POST(req: NextRequest) {
     try {
       const created = await createManualDraftPost(body.pillar || 'github', (body.postType || 'education') as 'education' | 'promotion');
       if ('error' in created) return NextResponse.json({ error: created.error }, { status: 422 });
-      const post = db.prepare('SELECT pillar, post_type, content, replies, source_urls, quality_status, quality_reasons FROM posts WHERE id = ?').get(created.postId) as any;
+      const post = db.prepare('SELECT pillar, post_type, content, replies, source_urls, quality_status, quality_reasons FROM posts WHERE id = ?').get(created.postId) as { pillar: string; post_type: string; content: string; replies: string | null; source_urls: string | null; quality_status: string | null; quality_reasons: string | null } | undefined;
+      if (!post) return NextResponse.json({ error: 'Draft yang baru dibuat tidak ditemukan' }, { status: 500 });
       logAudit('content_generated', `pillar=${post.pillar} quality=${post.quality_status}`);
       return NextResponse.json({
         content: { pillar: post.pillar, postType: post.post_type, text: post.content, replies: JSON.parse(post.replies || '[]'), sourceUrls: JSON.parse(post.source_urls || '[]') },
         quality: { passed: post.quality_status === 'passed', reasons: JSON.parse(post.quality_reasons || '[]') },
       });
-    } catch (error: any) {
-      logAudit('generate_error', error.message);
-      return NextResponse.json({ error: error.message }, { status: 500 });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Gagal membuat draft';
+      logAudit('generate_error', message);
+      return NextResponse.json({ error: message }, { status: 500 });
     }
   }
 
@@ -98,6 +115,9 @@ export async function POST(req: NextRequest) {
 }
 
 function publishResponse(result: PublishStoredPostResult) {
+  if (result.kind === 'disabled') {
+    return NextResponse.json({ error: 'Publikasi lokal dimatikan oleh kill switch.' }, { status: 423 });
+  }
   if (result.kind === 'posted') {
     return NextResponse.json({ success: true, id: result.id, url: result.url, verified: result.verified });
   }

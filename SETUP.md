@@ -28,9 +28,19 @@ The app listens on `127.0.0.1:${APP_PORT:-4000}` and stores SQLite data in the n
 
 Keep the app behind HTTPS or a trusted private network. Do not commit `.env.local`, tokens, database files, or provider credentials.
 
-## AI provider
+## Hermes Agent
 
-Configure an OpenAI-compatible endpoint with `HERMES_BASE_URL`, `HERMES_API_KEY`, and `HERMES_MODEL`, or point `HERMES_BIN` at a local compatible command. There is no bundled provider account or default private endpoint.
+Content generation invokes the `hermes` CLI from the same OS user that runs this application. Install Hermes Agent, configure your own provider, then run a one-line probe before enabling the Content Agent:
+
+```bash
+curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash
+hermes model
+printf 'Return exactly: HERMES_OK' | hermes chat --query-file - --oneshot --quiet --cli --provider YOUR_PROVIDER -m YOUR_MODEL
+```
+
+Set the exact provider/model in **Pengaturan** after the probe succeeds. `THREADS` is a valid model default only when your provider has that model or alias. The stock Docker image does not include Hermes Agent; use the native Node.js deployment for content generation or build a custom image with Hermes installed.
+
+See [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md) for the complete Meta Threads and Hermes setup.
 
 ## Backup and restore
 

@@ -8,6 +8,7 @@ import { invokeHermesAgent } from './hermes';
 import { ensureNaturalQuestionCta, formatPostText, normalizePillarHashtags, runQualityGate, splitOverlongThreadParts } from './quality-gate';
 import { fetchCurrentSourceContext, getApprovedSources } from './source-context';
 import { THREADS_LIMITS } from './threads-api';
+import { OFFICIAL_WEBSITE_URL } from './brand-links';
 
 type ContentSlot = { id?: number; pillar: string; post_type: 'education' | 'promotion'; slot_time: number; retry_count?: number };
 
@@ -49,7 +50,7 @@ async function createStoredPost(slot: ContentSlot, reservationId: number, passed
     const performanceHint = getPerformanceHint(db);
     const promoOffer = slot.post_type === 'promotion' ? (getSetting('promo_offer') || 'konsultasi kebutuhan website') : undefined;
     const promoReason = slot.post_type === 'promotion' ? (getSetting('promo_reason') || 'agar pembaca tahu langkah perbaikan website yang paling prioritas') : undefined;
-    const promoWebsiteUrl = getSetting('website_url') || undefined;
+    const promoWebsiteUrl = slot.post_type === 'promotion' ? OFFICIAL_WEBSITE_URL : undefined;
     const generated = await invokeHermesAgent({
     pillar: strategy.label,
     postType: slot.post_type,

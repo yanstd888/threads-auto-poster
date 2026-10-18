@@ -26,7 +26,7 @@ export async function GET(req: NextRequest) {
       expiresAt: token.expiresAt,
       requiresReconnect: !token.expiresAt,
     });
-  } catch (e: any) {
-    return NextResponse.json({ connected: false, error: e.message });
+  } catch (error: unknown) {
+    return NextResponse.json({ connected: false, error: error instanceof Error ? error.message : String(error) });
   }
 }

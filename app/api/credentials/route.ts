@@ -3,6 +3,8 @@ import { getDb, initDB, getSetting, setSetting, logAudit } from '@/lib/db';
 import { requireAuth, requireSameOrigin } from '@/lib/auth';
 import { saveToken } from '@/lib/threads-api';
 
+type CredentialRow = { id: string; service: string; expires_at: number | null; updated_at: number };
+
 export async function GET(req: NextRequest) {
   const session = requireAuth(req);
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -12,7 +14,7 @@ export async function GET(req: NextRequest) {
 
   const credentials = db.prepare(
     'SELECT id, service, expires_at as "expires_at", updated_at FROM tokens ORDER BY updated_at DESC'
-  ).all() as any[];
+  ).all() as CredentialRow[];
 
   return NextResponse.json({
     credentials,
@@ -53,8 +55,8 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: `Token tidak valid: ${validateData.error.message}`, validation: validateData.error }, { status: 400 });
       }
       logAudit('token_validated', 'threads');
-    } catch (e: any) {
-      logAudit('token_validation_error', e.message);
+    } catch (error: unknown) {
+      logAudit('token_validation_error', error instanceof Error ? error.message : String(error));
     }
   }
 

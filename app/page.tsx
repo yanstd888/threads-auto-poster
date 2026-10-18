@@ -1,16 +1,15 @@
+import { APP_VERSION_LABEL } from '@/lib/app-version';
+
 export default function Home() {
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50">
-      <div className="text-center">
-        <h1 className="text-3xl font-bold mb-4">Threads Auto-Poster</h1>
-        <p className="text-gray-600 mb-6">Auto-post ke Threads via Hermes agent</p>
-        <a
-          href="/login"
-          className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-        >
-          Login Admin
-        </a>
-      </div>
-    </div>
+    <main className="brutal-landing flex items-center">
+      <section className="brutal-landing__panel w-full p-6 sm:p-10">
+        <span className="brutal-landing__sticker">THREADS CONTENT CONTROL</span>
+        <span className="mt-3 block text-xs font-bold uppercase tracking-[0.2em]">Version {APP_VERSION_LABEL}</span>
+        <h1 className="brutal-landing__title mt-8 max-w-3xl text-5xl sm:text-7xl">POST WITH A PLAN.</h1>
+        <p className="mt-6 max-w-xl text-lg font-bold leading-snug">Plan, review content, and manage Threads sources from one place.</p>
+        <a href="/login" className="brutal-primary mt-8 px-6 py-3">ADMIN LOGIN</a>
+      </section>
+    </main>
   );
 }

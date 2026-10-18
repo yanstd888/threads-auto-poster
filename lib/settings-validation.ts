@@ -4,7 +4,6 @@ import {
   MAX_POSTS_PER_DAY,
   MIN_SCHEDULE_GAP_MINUTES,
 } from './scheduler';
-import { isSafeSourceUrl } from './source-url';
 
 export const SCHEDULE_KEYS = new Set([
   'posts_per_day',
@@ -25,8 +24,6 @@ export const ALLOWED_SETTING_KEYS = new Set([
   'hermes_provider',
   'ui_locale',
   'content_locale',
-  'github_url',
-  'website_url',
 ]);
 
 export const EXPORTABLE_SETTING_KEYS = new Set([
@@ -45,8 +42,6 @@ export const EXPORTABLE_SETTING_KEYS = new Set([
   'hermes_profile',
   'ui_locale',
   'content_locale',
-  'github_url',
-  'website_url',
 ]);
 
 export function validateSettingValue(key: string, raw: unknown): string | Error {
@@ -83,7 +78,6 @@ export function validateSettingValue(key: string, raw: unknown): string | Error 
     return Number.isFinite(ratio) && ratio >= 0 && ratio <= 0.2 ? String(ratio) : new Error('Promo ratio maksimal 20%');
   }
   if (key === 'ui_locale' || key === 'content_locale') return value === 'id' || value === 'en' ? value : new Error('Locale tidak valid');
-  if (key === 'github_url' || key === 'website_url') return value === '' || isSafeSourceUrl(value) ? value : new Error('URL harus HTTPS publik yang valid');
   if (key === 'posting_mode') return value === 'approval' || value === 'auto' ? value : new Error('Posting mode tidak valid');
   if (key === 'kill_switch') return value === 'true' || value === 'false' ? value : new Error('Kill switch tidak valid');
   return value.length > 0 && value.length <= 200 ? value : new Error('Nilai setting tidak valid');

@@ -40,6 +40,27 @@ export function getContentPillar(slug: string, db: DatabaseSync = getDb()): Cont
   return getContentPillars(db).find(pillar => pillar.slug === slug);
 }
 
+export function normalizeContentPillarWeights(db: DatabaseSync = getDb()): void {
+  const pillars = getContentPillars(db).filter(pillar => pillar.enabled);
+  if (pillars.length === 0) return;
+  const total = pillars.reduce((sum, pillar) => sum + Math.max(0, pillar.weight), 0);
+  const raw = pillars.map(pillar => ({
+    ...pillar,
+    exact: total > 0 ? (Math.max(0, pillar.weight) * 100) / total : 100 / pillars.length,
+  }));
+  const weights = raw.map(pillar => Math.floor(pillar.exact));
+  let remainder = 100 - weights.reduce((sum, weight) => sum + weight, 0);
+  const order = raw.map((pillar, index) => ({ index, fraction: pillar.exact - weights[index] }))
+    .sort((a, b) => b.fraction - a.fraction || raw[a.index].position - raw[b.index].position);
+  for (const item of order) {
+    if (remainder <= 0) break;
+    weights[item.index] += 1;
+    remainder -= 1;
+  }
+  const update = db.prepare('UPDATE content_pillars SET weight = ? WHERE slug = ?');
+  pillars.forEach((pillar, index) => update.run(weights[index], pillar.slug));
+}
+
 export function seedDefaultContentPillars(db: DatabaseSync = getDb()): void {
   const insert = db.prepare(`
     INSERT OR IGNORE INTO content_pillars

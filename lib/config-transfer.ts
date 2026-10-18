@@ -1,7 +1,7 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { EXPORTABLE_SETTING_KEYS, validateScheduleWindow, validateSettingValue } from './settings-validation';
 import { isSafeSourceUrl } from './source-url';
-import { isValidPillarSlug, isValidPillarSourcePolicy, type PillarLocale } from './content-pillars';
+import { isValidPillarSlug, isValidPillarSourcePolicy, normalizeContentPillarWeights, type PillarLocale } from './content-pillars';
 import { isValidCompositionSlug, type ContentComposition } from './content-compositions';
 
 export const CONFIG_SCHEMA_VERSION = 1;
@@ -138,6 +138,7 @@ export function applyConfigImport(db: DatabaseSync, config: ConfigExport): { set
       if (existing) updatePillar.run(pillar.name, pillar.enabled ? 1 : 0, pillar.weight, pillar.locale, pillar.source_policy, pillar.promo_eligible ? 1 : 0, pillar.position, pillar.slug);
       else insertPillar.run(pillar.slug, pillar.name, pillar.enabled ? 1 : 0, pillar.weight, pillar.locale, pillar.source_policy, pillar.promo_eligible ? 1 : 0, pillar.position);
     }
+    if (config.content_definitions.length > 0) normalizeContentPillarWeights(db);
     for (const composition of config.compositions) {
       if (!updateComposition || !insertComposition) throw new Error('Content composition import is unavailable');
       const existing = db.prepare('SELECT slug FROM content_compositions WHERE slug = ?').get(composition.slug);

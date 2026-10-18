@@ -1,7 +1,9 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Calendar, Clock, PauseCircle, PlayCircle } from 'lucide-react';
+import { useI18n } from '@/lib/i18n';
+import { labelForStatus, translateUi } from '@/lib/ui-translations';
 
 interface Slot {
   id: number;
@@ -23,7 +25,8 @@ interface Slot {
 interface AgentStatus {
   active: boolean;
   running: boolean;
-  phase: 'inactive' | 'preparing' | 'queued' | 'idle';
+  blocked?: boolean;
+  phase: 'inactive' | 'blocked' | 'preparing' | 'queued' | 'idle';
   preparing?: { id: number; pillar: string; post_type: string; slot_time: number } | null;
   queued: number;
   ready: number;
@@ -51,6 +54,8 @@ const statusTone = (slot: Slot) => {
 };
 
 export default function SchedulePage() {
+  const { locale } = useI18n();
+  const ui = (key: string, vars?: Record<string, string | number>) => translateUi(locale, key, vars);
   const [slots, setSlots] = useState<Slot[]>([]);
   const [loading, setLoading] = useState(true);
   const [settings, setSettings] = useState<Record<string, string>>({});
@@ -58,8 +63,10 @@ export default function SchedulePage() {
   const [agentChanging, setAgentChanging] = useState(false);
   const [agentError, setAgentError] = useState('');
   const [page, setPage] = useState(1);
+  const [now, setNow] = useState(0);
 
-  const fetchSlots = async () => {
+
+  const fetchSlots = useCallback(async () => {
     const [slotRes, settingRes] = await Promise.all([
       fetch('/api/settings?action=scheduler_status'),
       fetch('/api/settings'),
@@ -69,8 +76,9 @@ export default function SchedulePage() {
     setSlots(slotData.slots || []);
     setAgent(slotData.agent || null);
     setSettings(settingData.settings || {});
+    setNow(Date.now());
     setLoading(false);
-  };
+  }, []);
 
   const toggleKillSwitch = async () => {
     const res = await fetch('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'scheduler_toggle' }) });
@@ -84,27 +92,27 @@ export default function SchedulePage() {
     try {
       const res = await fetch('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'content_agent', enabled: !agent?.active }) });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Gagal mengubah status agent');
+      if (!res.ok) throw new Error(data.error || (locale === 'en' ? 'Failed to change agent status' : 'Gagal mengubah status agent'));
       setAgent(data);
       await fetchSlots();
     } catch (error) {
-      setAgentError(error instanceof Error ? error.message : 'Gagal mengubah status agent');
+      setAgentError(error instanceof Error ? error.message : (locale === 'en' ? 'Failed to change agent status' : 'Gagal mengubah status agent'));
     } finally {
       setAgentChanging(false);
     }
   };
 
-  const formatTime = (value: number) => new Intl.DateTimeFormat('id-ID', {
-    hour: '2-digit', minute: '2-digit', hour12: false, timeZone: settings.timezone || 'Asia/Jakarta',
+  const formatTime = (value: number) => new Intl.DateTimeFormat(locale === 'en' ? 'en-US' : 'id-ID', {
+    hour: '2-digit', minute: '2-digit', hour12: false, timeZone: settings.timezone || 'UTC',
   }).format(new Date(value));
 
-  const formatDateTime = (value: number) => new Intl.DateTimeFormat('id-ID', {
+  const formatDateTime = (value: number) => new Intl.DateTimeFormat(locale === 'en' ? 'en-US' : 'id-ID', {
     day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit',
-    hour12: false, timeZone: settings.timezone || 'Asia/Jakarta',
+    hour12: false, timeZone: settings.timezone || 'UTC',
   }).format(new Date(value));
 
   const formatDateKey = (value: number) => new Intl.DateTimeFormat('en-CA', {
-    year: 'numeric', month: '2-digit', day: '2-digit', timeZone: settings.timezone || 'Asia/Jakarta',
+    year: 'numeric', month: '2-digit', day: '2-digit', timeZone: settings.timezone || 'UTC',
   }).format(new Date(value));
 
   const PILLAR_LABELS = {
@@ -116,39 +124,44 @@ export default function SchedulePage() {
 
   const renderPreview = (slot: Slot) => {
     if (!slot.content) {
-      if (slot.status === 'retrying') return <p className="mt-2 text-sm text-blue-700">Retry otomatis #{slot.retry_count || 1}{slot.retry_at ? ` · mencoba lagi ${formatTime(slot.retry_at)}` : ''}</p>;
-      return <p className="mt-2 text-sm text-amber-700">{slot.status === 'preparing' ? 'Agent sedang mengambil source dan membuat konten.' : 'Menunggu antrean agent.'}</p>;
+      if (slot.status === 'retrying') return <p className="mt-2 text-sm text-blue-700">{locale === 'en' ? 'Automatic retry' : 'Retry otomatis'} #{slot.retry_count || 1}{slot.retry_at ? ` · ${locale === 'en' ? 'next attempt' : 'mencoba lagi'} ${formatTime(slot.retry_at)}` : ''}</p>;
+      if (slot.last_error) return <p className="mt-2 text-sm text-red-700">{slot.last_error}</p>;
+      if (settings.kill_switch === 'true') return <p className="mt-2 text-sm text-red-700">{ui('Content Agent and publishing are disabled by the kill switch.')}</p>;
+      if (!agent?.active) return <p className="mt-2 text-sm text-amber-700">{ui('Content Agent is inactive.')}</p>;
+      if (agent?.phase === 'blocked') return <p className="mt-2 text-sm text-red-700">{ui('Content Agent is blocked by the kill switch.')}</p>;
+      return <p className="mt-2 text-sm text-amber-700">{slot.status === 'preparing' ? ui('Agent is preparing content.') : ui('Waiting in the agent queue.')}</p>;
     }
     const replies = parseReplies(slot.replies);
     return (
       <details className="mt-3 rounded border bg-gray-50 p-3 text-sm">
-        <summary className="cursor-pointer font-medium">Lihat konten siap tayang · {slot.post_status} · {slot.quality_status}</summary>
+        <summary className="cursor-pointer font-medium">{locale === 'en' ? 'View ready content' : 'Lihat konten siap tayang'} · {labelForStatus(locale, slot.post_status || '')} · {slot.quality_status}</summary>
         <p className="mt-3 whitespace-pre-wrap text-gray-800">{slot.content}</p>
-        {replies.length > 0 && <div className="mt-3 border-l-2 border-gray-300 pl-3 text-xs text-gray-600"><p className="font-medium">Balasan thread ({replies.length})</p>{replies.map((reply, index) => <p key={index} className="mt-2 whitespace-pre-wrap">{reply}</p>)}</div>}
-        {slot.post_status === 'publish_unknown' && <p className="mt-3 text-xs text-amber-700">Root mungkin sudah terbit; balasan tidak diulang otomatis agar tidak menduplikasi post.</p>}
+        {replies.length > 0 && <div className="mt-3 border-l-2 border-gray-300 pl-3 text-xs text-gray-600"><p className="font-medium">{locale === 'en' ? 'Thread replies' : 'Balasan thread'} ({replies.length})</p>{replies.map((reply, index) => <p key={index} className="mt-2 whitespace-pre-wrap">{reply}</p>)}</div>}
+        {slot.post_status === 'publish_unknown' && <p className="mt-3 text-xs text-amber-700">{locale === 'en' ? 'The root post may already be live; replies are not retried automatically to avoid duplicates.' : 'Root mungkin sudah terbit; balasan tidak diulang otomatis agar tidak menduplikasi post.'}</p>}
       </details>
     );
   };
 
   useEffect(() => {
-    fetchSlots();
-    const interval = setInterval(fetchSlots, 5000);
-    return () => clearInterval(interval);
-  }, []);
+    const initial = setTimeout(() => { void fetchSlots(); }, 0);
+    const interval = setInterval(() => { void fetchSlots(); }, 5000);
+    return () => { clearTimeout(initial); clearInterval(interval); };
+  }, [fetchSlots]);
 
-  if (loading) return <div className="p-6">Loading...</div>;
+  if (loading) return <div className="p-6">{ui('Loading...')}</div>;
 
-  const todayKey = formatDateKey(Date.now());
-  const upcoming = slots.filter(s => s.slot_time > Date.now() && formatDateKey(s.slot_time) !== todayKey);
+  const todayKey = formatDateKey(now);
+  const today = slots.filter(s => formatDateKey(s.slot_time) === todayKey);
+
+  const upcoming = slots.filter(s => s.slot_time > now && formatDateKey(s.slot_time) !== todayKey);
   const totalPages = Math.max(1, Math.ceil(upcoming.length / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
   const paginatedUpcoming = upcoming.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
-  const today = slots.filter(s => formatDateKey(s.slot_time) === todayKey);
 
   return (
     <div className="p-6">
       <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold">Schedule</h1>
+        <h1 className="text-2xl font-bold">{ui('Schedule')}</h1>
         <button
           onClick={toggleKillSwitch}
           className={`px-4 py-2 rounded flex items-center gap-2 ${
@@ -158,27 +171,27 @@ export default function SchedulePage() {
           }`}
         >
           {settings.kill_switch === 'true' ? <PauseCircle className="w-4 h-4" /> : <PlayCircle className="w-4 h-4" />}
-          {settings.kill_switch === 'true' ? 'Kill Switch ON' : 'Kill Switch OFF'}
+          {settings.kill_switch === 'true' ? ui('Kill Switch ON') : ui('Kill Switch OFF')}
         </button>
       </div>
 
       <div className="bg-white rounded-lg border p-4 mb-6">
-        <h2 className="font-semibold mb-2">Current Schedule Settings</h2>
+        <h2 className="font-semibold mb-2">{ui('Current Schedule Settings')}</h2>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
           <div>
-            <span className="text-gray-500">Posts per day</span>
+            <span className="text-gray-500">{ui('Posts per day')}</span>
             <span className="font-medium ml-2">{settings.posts_per_day || '3'}</span>
           </div>
           <div>
-            <span className="text-gray-500">Active hours</span>
+            <span className="text-gray-500">{ui('Active hours')}</span>
             <span className="font-medium ml-2">{settings.active_hours_start || '8'}:00 - {settings.active_hours_end || '20'}:00</span>
           </div>
           <div>
-            <span className="text-gray-500">Timezone</span>
-            <span className="font-medium ml-2">{settings.timezone || 'Asia/Jakarta'}</span>
+            <span className="text-gray-500">{ui('Timezone')}</span>
+            <span className="font-medium ml-2">{settings.timezone || 'UTC'}</span>
           </div>
           <div>
-            <span className="text-gray-500">Mode</span>
+            <span className="text-gray-500">{ui('Mode')}</span>
             <span className="font-medium ml-2">{settings.posting_mode || 'approval'}</span>
           </div>
         </div>
@@ -189,16 +202,17 @@ export default function SchedulePage() {
           <div>
             <div className="flex items-center gap-2">
               <span className={`h-2.5 w-2.5 rounded-full ${agent?.running ? 'bg-green-500' : agent?.active ? 'bg-amber-500' : 'bg-gray-400'}`} aria-hidden="true" />
-              <h2 id="agent-status-title" className="font-semibold">Content Agent · {agent?.running ? 'Working' : agent?.active ? 'Active / Waiting' : 'Inactive'}</h2>
+              <h2 id="agent-status-title" className="font-semibold">{ui('Content Agent')} · {agent?.running ? ui('Working') : agent?.active ? ui('Active / Waiting') : ui('Inactive')}</h2>
             </div>
             <p className="mt-1 text-sm text-gray-600">
               {agent?.phase === 'preparing' && agent.preparing
                 ? `Sedang membuat slot #${agent.preparing.id} · ${PILLAR_LABELS[agent.preparing.pillar as keyof typeof PILLAR_LABELS] || agent.preparing.pillar}`
-                : agent?.phase === 'queued' ? 'Aktif, mengerjakan antrean secara serial.'
-                : agent?.phase === 'idle' ? 'Aktif, seluruh konten sudah siap.'
-                : 'Inactive: agent tidak memulai konten baru. Jadwal dan konten siap tetap tersimpan.'}
+                : agent?.phase === 'blocked' ? 'Agent aktif, tetapi tertahan oleh kill switch.'
+                : agent?.phase === 'queued' ? ui('Active, processing the queue serially.')
+                : agent?.phase === 'idle' ? ui('Active, all content is ready.')
+                : ui('Inactive: the agent does not start new content.')}
             </p>
-            <p className="mt-1 text-xs text-gray-500">Ready {agent?.ready ?? 0} · Antrean {agent?.queued ?? 0}{agent?.latest ? ` · Aktivitas terakhir ${formatDateTime(agent.latest.created_at)}` : ''}</p>
+            <p className="mt-1 text-xs text-gray-500">{ui('Ready')} {agent?.ready ?? 0} · {locale === 'en' ? 'Queue' : 'Antrean'} {agent?.queued ?? 0}{agent?.latest ? ` · ${locale === 'en' ? 'Last activity' : 'Aktivitas terakhir'} ${formatDateTime(agent.latest.created_at)}` : ''}</p>
             {agentError && <p role="alert" className="mt-2 text-sm text-red-600">{agentError}</p>}
           </div>
           <button
@@ -209,17 +223,18 @@ export default function SchedulePage() {
             className={`inline-flex items-center justify-center gap-2 rounded px-4 py-2 text-sm font-medium disabled:opacity-50 ${agent?.active ? 'bg-gray-100 text-gray-700' : 'bg-green-600 text-white'}`}
           >
             {agent?.active ? <PauseCircle className="h-4 w-4" /> : <PlayCircle className="h-4 w-4" />}
-            {agentChanging ? 'Memproses...' : agent?.active ? 'Set Inactive' : 'Set Active'}
+            {agentChanging ? ui('Processing...') : agent?.active ? ui('Set Inactive') : ui('Set Active')}
           </button>
         </div>
       </section>
 
       <div className="bg-white rounded-lg border mb-6">
-        <h2 className="font-semibold text-lg p-4 border-b">Today's Schedule</h2>
+        <h2 className="brutal-section-title">{ui("Today's Schedule")}</h2>
         {today.length === 0 ? (
-          <p className="text-gray-500 p-4">No slots scheduled for today</p>
+          <p className="text-gray-500 p-4">{ui('No slots scheduled for today')}</p>
         ) : (
-          <div className="divide-y">
+          <>
+            <div className="divide-y">
             {today.map((slot) => (
               <div key={slot.id} className="p-3">
                 <div className="flex items-center justify-between">
@@ -231,20 +246,22 @@ export default function SchedulePage() {
                     </span>
                   </div>
                   <span className={`text-xs px-2 py-1 rounded ${statusTone(slot)}`}>
-                    {displayStatus(slot)}
+                    {labelForStatus(locale, displayStatus(slot))}
                   </span>
                 </div>
                 {renderPreview(slot)}
               </div>
             ))}
           </div>
+
+          </>
         )}
       </div>
 
       <div className="bg-white rounded-lg border">
-        <h2 className="font-semibold text-lg p-4 border-b">Upcoming Schedule</h2>
+        <h2 className="brutal-section-title">{ui('Upcoming Schedule')}</h2>
         {upcoming.length === 0 ? (
-          <p className="text-gray-500 p-4">No upcoming slots</p>
+          <p className="text-gray-500 p-4">{ui('No upcoming slots')}</p>
         ) : (
           <>
             <div className="divide-y">
@@ -261,7 +278,7 @@ export default function SchedulePage() {
                       </div>
                     </div>
                     <span className={`text-xs px-2 py-1 rounded ${statusTone(slot)}`}>
-                      {displayStatus(slot)}
+                      {labelForStatus(locale, displayStatus(slot))}
                     </span>
                   </div>
                   {renderPreview(slot)}
@@ -269,9 +286,9 @@ export default function SchedulePage() {
               ))}
             </div>
             <nav className="flex items-center justify-between border-t p-3" aria-label="Pagination schedule">
-              <button type="button" onClick={() => setPage(Math.max(1, currentPage - 1))} disabled={currentPage === 1} className="rounded border px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-40">Sebelumnya</button>
-              <span className="text-sm text-gray-600">Halaman {currentPage} dari {totalPages}</span>
-              <button type="button" onClick={() => setPage(Math.min(totalPages, currentPage + 1))} disabled={currentPage === totalPages} className="rounded border px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-40">Berikutnya</button>
+              <button type="button" onClick={() => setPage(Math.max(1, currentPage - 1))} disabled={currentPage === 1} className="rounded border px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-40">{ui('Previous')}</button>
+              <span className="text-sm text-gray-600">{ui('Page {page} of {total}', { page: currentPage, total: totalPages })}</span>
+              <button type="button" onClick={() => setPage(Math.min(totalPages, currentPage + 1))} disabled={currentPage === totalPages} className="rounded border px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-40">{ui('Next')}</button>
             </nav>
           </>
         )}

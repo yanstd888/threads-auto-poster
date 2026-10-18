@@ -56,62 +56,109 @@ function stringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
 }
 
-const PROVIDER = process.env.HERMES_PROVIDER || 'openai-compatible';
 const activeHermesChildren = new Map<number, ChildProcess>();
 const HERMES_BIN = process.env.HERMES_BIN ||
   process.env.HERMES_BIN_PATH ||
   (process.platform === 'win32' ? 'hermes.exe' : 'hermes');
+const HERMES_READY_TTL_MS = 5 * 60 * 1000;
+const HERMES_FAILED_READY_TTL_MS = 60 * 1000;
+let readinessCache: { key: string; error: string | null; expiresAt: number } | null = null;
+let readinessInFlight: { key: string; promise: Promise<string | null> } | null = null;
+
+export interface HermesInvocationConfig {
+  model: string;
+  provider: string;
+  error?: string;
+}
+
+export function resolveHermesInvocationConfig(): HermesInvocationConfig {
+  return normalizeHermesInvocationConfig(
+    getSetting('hermes_model') || process.env.HERMES_MODEL || '',
+    getSetting('hermes_provider') || process.env.HERMES_PROVIDER || '',
+  );
+}
+
+export function normalizeHermesInvocationConfig(configuredModel: string, configuredProvider: string): HermesInvocationConfig {
+  const model = configuredModel.trim();
+  const provider = configuredProvider.trim();
+  if (!provider || /^(auto|cli|default)$/i.test(provider)) {
+    return { model, provider: '', error: 'Hermes provider is not configured. Set an exact provider name in Pengaturan.' };
+  }
+  if (!model || /^default$/i.test(model)) {
+    return { model: '', provider, error: 'Hermes model is not configured. Set an exact model or provider alias in Pengaturan.' };
+  }
+  return { model, provider };
+}
 
 export async function invokeHermesAgent(req: HermesRequest): Promise<HermesResponse> {
-  const model = getSetting('hermes_model') || process.env.HERMES_MODEL || 'default';
+  const config = resolveHermesInvocationConfig();
   const prompt = buildPrompt(req);
-  logAudit('hermes_invoke', `model=${model} pillar=${req.pillar} type=${req.postType} prompt_chars=${prompt.length}`);
-  // hermes chat --query-file - --oneshot -m <model> --provider <provider> --cli
-  // --cli: non-interactive mode, output content directly
+  if (config.error) return emptyHermesResponse(req, config.error);
+  const readinessError = await verifyHermesAgent(config);
+  if (readinessError) return emptyHermesResponse(req, readinessError);
+  logAudit('hermes_invoke', `model=${config.model} provider=${config.provider} pillar=${req.pillar} type=${req.postType} prompt_chars=${prompt.length}`);
   try {
-    const result = await new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
-      const child = spawn(/* turbopackIgnore: true */ HERMES_BIN, ['chat', '--query-file', '-', '--oneshot', '-m', model, '--provider', PROVIDER, '--quiet', '--cli'], {
-        stdio: ['pipe', 'pipe', 'pipe'],
-      });
-      trackHermesChild(child);
-      let stdout = '';
-      let stderr = '';
-      let timedOut = false;
-      const timeout = setTimeout(() => {
-        timedOut = true;
-        terminateHermesChild(child);
-      }, 300000);
-      child.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString(); });
-      child.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString(); });
-      child.on('error', (error: Error) => {
-        untrackHermesChild(child);
-        reject(error);
-      });
-      child.on('close', (code: number | null) => {
-        clearTimeout(timeout);
-        untrackHermesChild(child);
-        if (code === 0) resolve({ stdout, stderr });
-        else reject(new Error(timedOut ? 'Hermes timeout after 300 seconds' : stderr.trim() || `Process exited with code ${code ?? 'cancelled'}`));
-      });
-      child.stdin.end(prompt);
-    });
-
-    const trimmed = stripHermesOutput(result.stdout).trim();
-    logAudit('hermes_response', `success, length=${trimmed.length}`);
-    return parseHermesOutput(trimmed, req);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const retryPrompt = attempt === 0 ? prompt : `${prompt}\nFORMAT RETRY: Respons sebelumnya bukan JSON yang dapat diparse. Kirim ulang satu objek JSON valid saja, tanpa pembuka, penutup, atau markdown.`;
+      const result = await runHermesCli(retryPrompt, config, 300_000);
+      const trimmed = stripHermesOutput(result.stdout).trim();
+      const parsed = parseHermesOutput(trimmed, req);
+      if (!parsed.error) {
+        logAudit('hermes_response', `success, length=${trimmed.length} format_attempt=${attempt + 1}`);
+        return parsed;
+      }
+      logAudit('hermes_invalid_json', `format_attempt=${attempt + 1} length=${trimmed.length}`);
+    }
+    return emptyHermesResponse(req, 'invalid_json: Hermes output tidak berisi JSON konten yang valid');
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Hermes invocation failed';
     logAudit('hermes_error', message);
-    return {
-      text: '',
-      replies: [],
-      pillar: req.pillar,
-      postType: req.postType,
-      keywords: [],
-      sourceUrls: [],
-      error: message,
-    };
+    return emptyHermesResponse(req, `agent_crash: ${message}`);
   }
+}
+
+export async function verifyHermesAgent(config = resolveHermesInvocationConfig()): Promise<string | null> {
+  if (config.error) return `agent_crash: ${config.error}`;
+  const key = `${config.provider}\u0000${config.model}`;
+  const now = Date.now();
+  if (readinessCache?.key === key && readinessCache.expiresAt > now) return readinessCache.error;
+  if (readinessInFlight?.key === key) return readinessInFlight.promise;
+  const promise = runHermesCli('Return exactly: HERMES_OK', config, 45_000)
+    .then(({ stdout }) => stripHermesOutput(stdout).includes('HERMES_OK') ? null : 'agent_crash: Hermes readiness probe did not return HERMES_OK')
+    .catch((error: unknown) => `agent_crash: ${error instanceof Error ? error.message : 'Hermes readiness probe failed'}`)
+    .then(error => {
+      readinessCache = { key, error, expiresAt: Date.now() + (error ? HERMES_FAILED_READY_TTL_MS : HERMES_READY_TTL_MS) };
+      logAudit(error ? 'hermes_preflight_failed' : 'hermes_preflight_ok', `provider=${config.provider} model=${config.model}${error ? ` error=${error}` : ''}`);
+      return error;
+    })
+    .finally(() => { readinessInFlight = null; });
+  readinessInFlight = { key, promise };
+  return promise;
+}
+
+function emptyHermesResponse(req: HermesRequest, error: string): HermesResponse {
+  return { text: '', replies: [], pillar: req.pillar, postType: req.postType, keywords: [], sourceUrls: [], error };
+}
+
+function runHermesCli(prompt: string, config: HermesInvocationConfig, timeoutMs: number): Promise<{ stdout: string; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(/* turbopackIgnore: true */ HERMES_BIN, ['chat', '--query-file', '-', '--oneshot', '--quiet', '--cli', '-m', config.model, '--provider', config.provider], { stdio: ['pipe', 'pipe', 'pipe'] });
+    trackHermesChild(child);
+    let stdout = '';
+    let stderr = '';
+    let timedOut = false;
+    const timeout = setTimeout(() => { timedOut = true; terminateHermesChild(child); }, timeoutMs);
+    child.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString(); });
+    child.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString(); });
+    child.on('error', (error: Error) => { untrackHermesChild(child); reject(error); });
+    child.on('close', (code: number | null) => {
+      clearTimeout(timeout);
+      untrackHermesChild(child);
+      if (code === 0) resolve({ stdout, stderr });
+      else reject(new Error(timedOut ? `Hermes timeout after ${Math.round(timeoutMs / 1000)} seconds` : stderr.trim() || `Process exited with code ${code ?? 'cancelled'}`));
+    });
+    child.stdin.end(prompt);
+  });
 }
 
 export function cancelActiveHermesAgent(): boolean {
@@ -283,8 +330,10 @@ export function parseHermesOutput(output: string, req: HermesRequest): HermesRes
   try {
     const parsed: unknown = JSON.parse(jsonStr);
     const record = isRecord(parsed) ? parsed : {};
+    const text = typeof record.text === 'string' ? record.text.trim() : '';
+    if (!text) throw new Error('missing text');
     return {
-      text: typeof record.text === 'string' ? record.text : '',
+      text,
       replies: stringArray(record.replies),
       pillar: req.pillar,
       postType: req.postType,

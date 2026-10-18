@@ -1,31 +1,66 @@
-# Threads Auto Poster
+<p align="center">
+  <h1 align="center">Threads Auto Poster</h1>
+  <p align="center">A self-hosted workspace for researching, drafting, reviewing, scheduling, and publishing Threads posts.</p>
+</p>
 
-Self-hosted Threads content scheduling and approval workflow with SQLite storage, source registry, grounded content generation, quality gates, and optional Threads publishing.
+<p align="center">
+  <a href="#quick-start">Quick start</a> ·
+  <a href="#how-it-works">How it works</a> ·
+  <a href="#documentation">Documentation</a> ·
+  <a href="#deployment">Deployment</a> ·
+  <a href="#safety">Safety</a>
+</p>
 
-The project is designed to run locally or behind a private HTTPS ingress. Posting is **approval-first** by default.
+<p align="center">
+  <img alt="License: Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-blue.svg">
+  <img alt="Runtime: Node.js 22+" src="https://img.shields.io/badge/node.js-22%2B-339933.svg">
+  <img alt="Storage: SQLite" src="https://img.shields.io/badge/storage-SQLite-003B57.svg">
+</p>
 
-## Features
+---
 
-- Configurable posts/day, active hours, timezone, active days, and minimum scheduler gap.
-- Database-backed content pillars and compositions; ordinary edits do not require code changes.
-- Indonesian and English UI/content language settings.
-- HTTPS source registry with search, pagination, health checks, filters, import, and export.
-- Config export/import for non-secret settings, sources, pillars, and compositions.
-- Config transfer excludes tokens, password hashes, users, kill switch state, history, and runtime database rows.
-- Single-admin password authentication with an HTTP-only session cookie and login rate limiting.
-- SQLite WAL mode with backup and restore scripts.
-- Docker Compose deployment with a persistent `/data` volume.
-- Apache-2.0 licensed.
+## Why this exists
 
-## Requirements
+Publishing consistently is easier when research, drafting, review, scheduling, and publishing live in one private workspace. Threads Auto Poster keeps that workflow self-hosted with SQLite, a source registry, an approval queue, and optional Threads publishing.
 
-- Node.js 22+
-- npm
-- Docker Engine / Docker Desktop for the container workflow
-- A Hermes CLI/provider only when generation is enabled
-- Threads app credentials only when real publishing is enabled
+It starts in approval mode. Real publishing stays off until you connect a Threads account and explicitly review a draft.
 
-## Local setup
+## What it includes
+
+| Area | Included |
+| --- | --- |
+| Content | Source-backed drafts, content pillars, compositions, and quality gates |
+| Review | Draft queue, approval-first publishing, post history, and publish status |
+| Schedule | Posts per day, active hours, timezone, active days, and minimum gaps |
+| Sources | HTTPS-only registry with search, filters, health checks, import, and export |
+| AI generation | Optional Hermes CLI integration with configurable provider and model |
+| Threads | OAuth connection, encrypted token storage, and optional publishing |
+| Operations | SQLite WAL, backup/restore scripts, config transfer, and Docker Compose |
+| Access | One admin account, HTTP-only session cookie, and login rate limiting |
+
+## How it works
+
+```text
+Approved HTTPS sources
+        │
+        ▼
+Content pillars + compositions
+        │
+        ▼
+Hermes CLI (optional)
+        │
+        ▼
+Draft + quality checks
+        │
+        ▼
+Approval queue ──► Schedule ──► Threads API
+```
+
+The content agent is optional. You can use the dashboard, sources, scheduling, backups, and Threads connection without it.
+
+## Quick start
+
+Use the native Node.js workflow when you want content generation through Hermes.
 
 ```bash
 cp .env.example .env.local
@@ -33,11 +68,66 @@ npm ci
 npm run dev
 ```
 
-Open `http://localhost:3000` unless your local command uses another port. Set a strong `ADMIN_PASSWORD` with at least 16 characters and a random `JWT_SECRET` before signing in.
+Open the URL printed by Next.js. Before signing in, set a strong `ADMIN_PASSWORD`, a random `JWT_SECRET`, and a separate `TOKEN_ENCRYPTION_KEY` in `.env.local`.
 
-The default data file is `data/app.db`. Set `THREADS_DATA_DIR` to move it elsewhere.
+Then keep the safe defaults while you set up:
 
-## Docker
+1. Sign in.
+2. Leave posting mode on **Draft (approval required)**.
+3. Keep the **Kill Switch** on.
+4. Add approved sources in **Sumber**.
+5. Configure pillars and compositions in **Pengaturan**.
+6. Verify Hermes before enabling the Content Agent.
+7. Connect Threads only after your public HTTPS callback is ready.
+
+For the complete setup path, including Meta for Developers and OAuth, read [Getting Started](docs/GETTING_STARTED.md).
+
+## Documentation
+
+| Guide | Use it for |
+| --- | --- |
+| [Getting Started](docs/GETTING_STARTED.md) | First install, secrets, admin login, Hermes, Meta Threads, OAuth, publishing, and backups |
+| [Setup](SETUP.md) | Environment variables and deployment details |
+| [Open-source readiness](docs/OPEN_SOURCE_READINESS.md) | Public-release gates that still need proof |
+| [Open-source plan](docs/OPEN_SOURCE_PLAN.md) | Scope and release plan |
+
+## Hermes generation
+
+Install and configure Hermes Agent as the same OS user that runs this app. Verify the exact provider and model before saving them in the dashboard:
+
+```bash
+printf 'Return exactly: HERMES_OK' | hermes chat --query-file - --oneshot --quiet --cli --provider YOUR_PROVIDER -m YOUR_MODEL
+```
+
+The command must print `HERMES_OK`. Set the exact provider and model names in **Pengaturan**, then enable the Content Agent.
+
+`THREADS` can be used as a model only when your Hermes provider defines that model or alias.
+
+## Threads connection
+
+To publish to Threads, create a Threads app in Meta for Developers, register this exact callback pattern, and place the matching value in `THREADS_OAUTH_REDIRECT_URI`:
+
+```text
+https://your-domain.example/api/auth/threads/callback
+```
+
+Use **Kredensial → Connect Threads** to complete OAuth. The app encrypts the returned token in SQLite. See [Getting Started](docs/GETTING_STARTED.md#5-create-a-threads-app-in-meta-for-developers) for permissions, setup order, and operational checks.
+
+## Deployment
+
+### Native Node.js
+
+This is the complete deployment path today because Hermes runs on the application OS:
+
+```bash
+npm ci
+npm run build
+npm run start
+```
+
+Keep the app behind HTTPS and an access layer when exposing it remotely.
+
+### Docker Compose
 
 ```bash
 cp .env.example .env
@@ -45,9 +135,11 @@ cp .env.example .env
 docker compose -f compose.yaml up -d --build
 ```
 
-The app binds to `127.0.0.1:${APP_PORT:-4000}`. Put Caddy, Nginx, Cloudflare Tunnel, or another controlled HTTPS ingress in front of it when remote access is needed.
+The stock Docker image runs the dashboard, SQLite, scheduler, token storage, and Threads publishing. It does not include Hermes Agent, so do not enable content generation unless you provide a Hermes CLI inside that container.
 
-Stop only this Compose project:
+The Compose app binds to `127.0.0.1:${APP_PORT:-4000}`. Use a controlled HTTPS ingress such as Cloudflare Tunnel, Caddy, or Nginx for remote access.
+
+Stop only this project:
 
 ```bash
 docker compose -f compose.yaml down
@@ -55,43 +147,29 @@ docker compose -f compose.yaml down
 
 ## Backup and restore
 
-Back up while the app is running; the script uses SQLite `VACUUM INTO` for a consistent copy:
+Create a consistent SQLite backup while the app is running:
 
 ```bash
 THREADS_DATA_DIR=./data BACKUP_DIR=./backups bash scripts/backup.sh
 ```
 
-Restore only after stopping the app and checking the backup path:
+Restore only after stopping the app and checking the selected backup:
 
 ```bash
 docker compose -f compose.yaml stop app
 THREADS_DATA_DIR=./data RESTORE_CONFIRM=YES bash scripts/restore.sh ./backups/app-YYYYMMDDTHHMMSSZ.db
 ```
 
-The restore script refuses to run without `RESTORE_CONFIRM=YES`, checks SQLite integrity, and removes stale WAL sidecars.
+The restore script requires `RESTORE_CONFIRM=YES`, checks SQLite integrity, and removes stale WAL sidecars.
 
-## Configuration
-
-Settings are changed in the dashboard. Relevant environment variables:
-
-- `JWT_SECRET` — session signing secret.
-- `ADMIN_PASSWORD` — initial single-admin password; existing SQLite credentials are preserved during startup.
-- `TOKEN_ENCRYPTION_KEY` — encryption key for stored Threads tokens.
-- `THREADS_DATA_DIR` — persistent SQLite directory.
-- `MAX_POSTS_PER_DAY` — optional upper safety bound; default 288, with active-hour capacity still enforced.
-- `NEXTAUTH_URL` / `APP_PUBLIC_URL` — allowed origins for same-origin mutation checks.
-- `HERMES_PROVIDER`, `HERMES_MODEL`, `HERMES_BIN` — generation CLI settings.
-- `THREADS_APP_ID`, `THREADS_APP_SECRET`, `THREADS_OAUTH_REDIRECT_URI` — optional Threads OAuth settings.
-
-Exported JSON is portable configuration, not a backup. Use the database backup scripts for runtime state.
-
-## Safety defaults
+## Safety
 
 - Approval mode is the default posting mode.
 - Standalone posts are the default composition mode.
-- Source URLs must use HTTPS and cannot target localhost, private, or link-local addresses.
-- Generated content must cite approved sources and pass quality checks before it can be scheduled or published.
-- Real provider credentials and production posting are not required for local checks.
+- Source URLs must use HTTPS and cannot point to localhost, private, or link-local addresses.
+- Generated content must cite approved sources and pass quality checks before scheduling or publishing.
+- A `publish_unknown` result is not auto-retried because Threads may already have accepted the post.
+- Config export excludes tokens, password hashes, users, kill switch state, history, and runtime database rows.
 
 ## Verification
 
@@ -100,8 +178,6 @@ npx tsc --noEmit --pretty false
 npx tsx check-content-and-schedule.ts
 npm run build
 ```
-
-CI also runs dependency installation, production build, audit checks, and repository secret guards.
 
 ## License
 

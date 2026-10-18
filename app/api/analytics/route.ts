@@ -4,6 +4,9 @@ import { requireAuth } from '@/lib/auth';
 
 const PAGE_SIZE = 10;
 const MIN_LEARNING_SAMPLE = 5;
+type PillarRow = { pillar: string; count: number; posted_count: number };
+type StatusRow = { status: string; count: number };
+type MetricRow = { pillar: string; created_at: number; views: number; likes: number; replies: number; reposts: number; quotes: number; shares: number };
 
 export async function GET(req: NextRequest) {
   const session = requireAuth(req);
@@ -21,11 +24,11 @@ export async function GET(req: NextRequest) {
 
   const byPillar = db.prepare(
     'SELECT pillar, COUNT(*) as count, SUM(CASE WHEN status = \'posted\' THEN 1 ELSE 0 END) as posted_count FROM posts GROUP BY pillar'
-  ).all() as any[];
+  ).all() as PillarRow[];
 
   const byStatus = db.prepare(
     'SELECT status, COUNT(*) as count FROM posts GROUP BY status'
-  ).all() as any[];
+  ).all() as StatusRow[];
 
   const recentMetricsTotal = db.prepare("SELECT COUNT(*) as count FROM posts WHERE status = 'posted'").get() as { count: number };
   const recentMetricsTotals = db.prepare(`
@@ -42,7 +45,7 @@ export async function GET(req: NextRequest) {
     LEFT JOIN metrics m ON m.post_id = p.id
     WHERE p.status = 'posted'
     ORDER BY p.created_at DESC LIMIT ? OFFSET ?
-  `).all(PAGE_SIZE, (currentPage - 1) * PAGE_SIZE) as any[];
+  `).all(PAGE_SIZE, (currentPage - 1) * PAGE_SIZE) as MetricRow[];
 
   const learning = db.prepare(`
     SELECT a.hook_mechanism AS dimension, COUNT(*) AS sample_size,

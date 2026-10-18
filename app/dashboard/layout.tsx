@@ -1,10 +1,13 @@
 'use client';
 
 import Link from 'next/link';
+import Image from 'next/image';
 import { usePathname, useRouter } from 'next/navigation';
 import { LayoutDashboard, Calendar, FileText, Settings, Shield, BarChart3, LogOut, ExternalLink } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { I18nProvider, useI18n, type AppLocale } from '@/lib/i18n';
+import { OFFICIAL_GITHUB_URL, OFFICIAL_STORE_URL, OFFICIAL_WEBSITE_URL } from '@/lib/brand-links';
+import { APP_VERSION_LABEL } from '@/lib/app-version';
 
 const menuItems = [
   { icon: LayoutDashboard, key: 'dashboard', href: '/dashboard' },
@@ -16,7 +19,7 @@ const menuItems = [
   { icon: Settings, key: 'settings', href: '/dashboard/settings' },
 ] as const;
 
-type SettingsState = { kill_switch?: string; ui_locale?: string; github_url?: string; website_url?: string };
+type SettingsState = { kill_switch?: string; ui_locale?: string };
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const [locale, setLocale] = useState<AppLocale>('id');
@@ -33,7 +36,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const changeLocale = async (next: AppLocale) => {
     setLocale(next);
     setSettings(current => ({ ...current, ui_locale: next }));
-    await fetch('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ui_locale: next }) });
+    await fetch('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: 'ui_locale', value: next }) });
   };
 
   return <I18nProvider locale={locale} onLocaleChange={changeLocale}><DashboardShell settings={settings}>{children}</DashboardShell></I18nProvider>;
@@ -63,24 +66,35 @@ function DashboardShell({ children, settings }: { children: React.ReactNode; set
   const label = (key: (typeof menuItems)[number]['key']) => key === 'dashboard' ? t.dashboard : key === 'schedule' ? t.schedule : key === 'content' ? t.content : key === 'sources' ? t.sources : key === 'settings' ? t.settings : key === 'analytics' ? (locale === 'en' ? 'Analytics' : 'Analitik') : (locale === 'en' ? 'Credentials' : 'Kredensial');
 
   return (
-    <div className="flex h-screen bg-gray-50 overflow-hidden">
-      <div className="w-64 bg-white border-r flex flex-col">
-        <div className="p-4 border-b"><h2 className="font-bold text-lg">{t.appName}</h2><p className="text-xs text-gray-500">v1.0.0</p></div>
-        <nav className="flex-1 p-2">
+    <div className="brutal-app flex min-h-[100dvh] overflow-hidden">
+      <aside className="brutal-sidebar flex shrink-0 flex-col">
+        <div className="border-b-[3px] border-black p-5">
+          <Link href="/dashboard" className="brutal-brand">
+            <span className="brutal-brand__name">{t.appName}</span>
+            <span className="brutal-brand__tag">CONTENT CONTROL</span>
+          </Link>
+        </div>
+        <nav className="flex-1 p-3" aria-label="Dashboard">
           {menuItems.map((item) => {
             const isActive = pathname === item.href;
-            return <Link key={item.href} href={item.href} className={`flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors ${isActive ? 'bg-blue-50 text-blue-600' : 'text-gray-600 hover:bg-gray-50'}`}><item.icon className="w-4 h-4" />{label(item.key)}</Link>;
+            return <Link key={item.href} href={item.href} className={`brutal-nav-link flex items-center gap-3 px-3 py-2 text-sm ${isActive ? 'brutal-nav-link--active' : ''}`}><item.icon className="h-4 w-4" strokeWidth={2.5} />{label(item.key)}</Link>;
           })}
+          <div className="brutal-brand-links" aria-label="Official links">
+            <a href={OFFICIAL_GITHUB_URL} target="_blank" rel="noopener noreferrer"><Image src="/brand/github.svg" alt="GitHub" width={16} height={16} />YANSTD888</a>
+            <a href={OFFICIAL_STORE_URL} target="_blank" rel="noopener noreferrer"><ExternalLink className="h-4 w-4" aria-hidden="true" />TOKOYANS</a>
+            <a href={OFFICIAL_WEBSITE_URL} target="_blank" rel="noopener noreferrer"><ExternalLink className="h-4 w-4" aria-hidden="true" />YANSTD888</a>
+          </div>
         </nav>
-        <div className="p-4 border-t">
-          <label className="block text-xs text-gray-500 mb-1">{t.language}</label>
-          <select value={locale} onChange={event => void setLocale(event.target.value as AppLocale)} className="w-full mb-2 rounded-md border px-2 py-1 text-sm"><option value="id">Bahasa Indonesia</option><option value="en">English</option></select>
-          <div className="flex gap-2 mb-2 text-xs">{settings.github_url ? <a className="text-blue-600 hover:underline" href={settings.github_url} target="_blank" rel="noreferrer">{t.github}</a> : null}{settings.website_url ? <a className="text-blue-600 hover:underline" href={settings.website_url} target="_blank" rel="noreferrer">{t.website}</a> : null}</div>
-          <button onClick={toggleKillSwitch} disabled={loading} className={`w-full flex items-center justify-center gap-2 px-3 py-2 rounded-md text-sm font-medium ${killSwitch ? 'bg-gray-100 text-gray-600' : 'bg-green-100 text-green-700'}`}>{killSwitch ? `${t.killSwitch}: ON` : `${t.killSwitch}: OFF`}</button>
-          <button onClick={logout} className="w-full flex items-center justify-center gap-2 px-3 py-2 mt-2 rounded-md text-sm text-red-600 hover:bg-red-50"><LogOut className="w-4 h-4" />{t.logout}</button>
+        <div className="border-t-[3px] border-black p-4">
+          <label className="mb-1 block text-xs font-bold uppercase tracking-wide">{t.language}</label>
+          <select value={locale} onChange={event => void setLocale(event.target.value as AppLocale)} className="mb-3 w-full px-2 py-2 text-sm"><option value="id">Bahasa Indonesia</option><option value="en">English</option></select>
+
+          <button onClick={toggleKillSwitch} disabled={loading} className={`mb-2 flex w-full items-center justify-center gap-2 px-3 py-2 text-sm ${killSwitch ? 'bg-gray-100 text-gray-800' : 'bg-green-100 text-green-800'}`}>{killSwitch ? `${t.killSwitch}: ON` : `${t.killSwitch}: OFF`}</button>
+          <button onClick={logout} className="flex w-full items-center justify-center gap-2 bg-pink-300 px-3 py-2 text-sm text-black"><LogOut className="h-4 w-4" strokeWidth={2.5} />{t.logout}</button>
+          <p className="mt-3 text-center text-[11px] font-bold uppercase tracking-wide text-gray-500">Version {APP_VERSION_LABEL}</p>
         </div>
-      </div>
-      <main className="flex-1 overflow-auto">{children}</main>
+      </aside>
+      <main className="brutal-main flex-1 overflow-auto">{children}</main>
     </div>
   );
 }
