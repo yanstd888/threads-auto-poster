@@ -147,7 +147,23 @@ sqlite3 -readonly ./backups/app-YYYYMMDDTHHMMSSZ.db 'PRAGMA integrity_check;'
 
 For restore instructions, see [README.md](../README.md#backup-and-restore). Never restore over a live database without first making a fresh backup.
 
-## 9. Operational checklist
+## 9. Updates
+
+The dashboard checks the public GitHub Releases feed and shows a warning when a newer release is available. The button opens the release page; it does not overwrite a running installation.
+
+Update manually from the application directory:
+
+```bash
+git fetch origin --tags
+git checkout main
+git pull --ff-only origin main
+npm ci
+npm run build
+```
+
+Restart the process using the same process manager that started it. Keep `.env.local`, `data/`, and backups outside Git, and make a fresh SQLite backup before upgrading.
+
+## 10. Operational checklist
 
 - [ ] `npm run build` passes.
 - [ ] Hermes probe prints the expected response under the app OS user.

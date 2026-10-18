@@ -20,10 +20,12 @@ const menuItems = [
 ] as const;
 
 type SettingsState = { kill_switch?: string; ui_locale?: string };
+type UpdateState = { latestVersion?: string | null; updateAvailable?: boolean; releaseUrl?: string };
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const [locale, setLocale] = useState<AppLocale>('id');
   const [settings, setSettings] = useState<SettingsState>({});
+  const [update, setUpdate] = useState<UpdateState>({});
 
   useEffect(() => {
     fetch('/api/settings').then(r => r.json()).then(data => {
@@ -33,16 +35,22 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     }).catch(() => undefined);
   }, []);
 
+  useEffect(() => {
+    fetch('/api/update').then(response => response.ok ? response.json() : null).then(data => {
+      if (data) setUpdate(data);
+    }).catch(() => undefined);
+  }, []);
+
   const changeLocale = async (next: AppLocale) => {
     setLocale(next);
     setSettings(current => ({ ...current, ui_locale: next }));
     await fetch('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: 'ui_locale', value: next }) });
   };
 
-  return <I18nProvider locale={locale} onLocaleChange={changeLocale}><DashboardShell settings={settings}>{children}</DashboardShell></I18nProvider>;
+  return <I18nProvider locale={locale} onLocaleChange={changeLocale}><DashboardShell settings={settings} update={update}>{children}</DashboardShell></I18nProvider>;
 }
 
-function DashboardShell({ children, settings }: { children: React.ReactNode; settings: SettingsState }) {
+function DashboardShell({ children, settings, update }: { children: React.ReactNode; settings: SettingsState; update: UpdateState }) {
   const pathname = usePathname();
   const router = useRouter();
   const { t, locale, setLocale } = useI18n();
@@ -86,6 +94,11 @@ function DashboardShell({ children, settings }: { children: React.ReactNode; set
           </div>
         </nav>
         <div className="border-t-[3px] border-black p-4">
+          {update.updateAvailable && update.latestVersion && update.releaseUrl ? (
+            <a href={update.releaseUrl} target="_blank" rel="noopener noreferrer" className="mb-3 block border-2 border-black bg-yellow-200 px-3 py-2 text-xs font-bold text-black">
+              Update tersedia: v{update.latestVersion} → buka release
+            </a>
+          ) : null}
           <label className="mb-1 block text-xs font-bold uppercase tracking-wide">{t.language}</label>
           <select value={locale} onChange={event => void setLocale(event.target.value as AppLocale)} className="mb-3 w-full px-2 py-2 text-sm"><option value="id">Bahasa Indonesia</option><option value="en">English</option></select>
 

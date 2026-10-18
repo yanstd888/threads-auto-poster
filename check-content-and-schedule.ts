@@ -15,11 +15,16 @@ import { reservePrimarySource, releasePrimarySourceReservation } from './lib/con
 import { applyConfigImport, createConfigExport, validateConfigImport } from './lib/config-transfer';
 import { ALLOWED_SETTING_KEYS } from './lib/settings-validation';
 import { APP_VERSION_LABEL } from './lib/app-version';
+import { compareVersions, parseVersion } from './lib/update-check';
 
 const requiredKeywords = ['repo GitHub terbaik', 'repository open source', 'tools developer gratis'];
 assert.equal(ALLOWED_SETTING_KEYS.has('github_url'), false);
 assert.equal(ALLOWED_SETTING_KEYS.has('website_url'), false);
 assert.match(APP_VERSION_LABEL, /^v\d+\.\d+\.\d+$/);
+assert.deepEqual(parseVersion('v1.2.3'), [1, 2, 3]);
+assert.equal(compareVersions('1.2.0', '1.1.9'), 1);
+assert.equal(compareVersions('1.2.0', '1.2.0'), 0);
+assert.equal(compareVersions('1.1.9', '1.2.0'), -1);
 const resourceUrl = 'https://github.com/public-apis/public-apis';
 const quality = runQualityGate({
   text: `3 repo GitHub terbaik untuk dicoba kalau kamu butuh repository open source dan tools developer gratis. ${resourceUrl} Repo mana yang paling berguna untuk workflow-mu? #opensource`,

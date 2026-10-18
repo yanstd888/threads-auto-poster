@@ -58,6 +58,8 @@ Approval queue ──► Schedule ──► Threads API
 
 The content agent is optional. You can use the dashboard, sources, scheduling, backups, and Threads connection without it.
 
+The dashboard displays the current version and checks the public GitHub Releases feed for newer releases. Updates remain manual: open the release notice, back up SQLite, pull the tagged source, reinstall dependencies, rebuild, and restart the service. The app never overwrites its own running files from a browser request.
+
 ## Quick start
 
 Use the native Node.js workflow when you want content generation through Hermes.

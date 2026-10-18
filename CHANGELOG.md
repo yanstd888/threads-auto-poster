@@ -2,6 +2,13 @@
 
 All notable project changes are recorded here.
 
+## 0.2.0 - 2026-10-19
+
+### Added
+
+- Dashboard version label and authenticated GitHub release update notification.
+- Manual upgrade instructions; the application does not self-replace running files.
+
 ## 0.1.0 - 2026-10-18
 
 ### Added
