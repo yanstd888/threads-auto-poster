@@ -48,13 +48,13 @@ Use it as a **Threads content planner**, **source-backed social media scheduler*
 
 ## Product preview
 
-The public landing page is intentionally simple: explain the workflow first, then let the operator enable the advanced parts that are actually needed.
+The main product interface is the authenticated **Threads Auto Poster dashboard**, where operators manage schedules, content, analytics, credentials, sources, settings, and the kill switch from one workspace.
 
 <p align="center">
-  <img src="./docs/images/landing-page.png" alt="Threads Auto Poster landing page showing version and product message" width="900" />
+  <img src="./docs/images/dashboard-preview.png" alt="Threads Auto Poster dashboard with sidebar navigation, schedule overview, quick settings, and recent posts" width="1100" />
 </p>
 
-<p align="center"><sub>Current application landing page, captured from the v0.2.0 build.</sub></p>
+<p align="center"><sub>Threads Auto Poster dashboard preview.</sub></p>
 
 ## Features
 
