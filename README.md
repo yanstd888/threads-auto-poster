@@ -114,8 +114,6 @@ The content agent is not required for the core product. You can use the source r
 
 Threads Auto Poster currently supports **Hermes Agent** as its CLI content-generation runtime. More integrations should only be added when they have a tested command contract, readiness check, timeout policy, and safe failure behavior.
 
-The Hermes Agent icon in the support card is sourced from the [official Hermes Agent repository](https://github.com/NousResearch/hermes-agent).
-
 <p align="center">
   <img src="./docs/images/supported-cli-tools.svg" alt="Supported CLI tools: Hermes Agent" width="720" />
 </p>
