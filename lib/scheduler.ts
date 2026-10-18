@@ -462,7 +462,7 @@ export function isBlockedSourceError(error: string): boolean {
 }
 
 export function shouldRetryPreparationUntilSlot(kind: PreparationErrorKind): boolean {
-  return kind === 'source_transient' || kind === 'agent_timeout' || kind === 'agent_crash' || kind === 'invalid_json';
+  return kind === 'source_transient' || kind === 'agent_timeout' || kind === 'agent_crash' || kind === 'invalid_json' || kind === 'quality_reject';
 }
 
 function markPreparationRetry(slot: ScheduleRow, error: string, qualityFailure = false) {
@@ -470,8 +470,8 @@ function markPreparationRetry(slot: ScheduleRow, error: string, qualityFailure =
   const labeledError = `${kind}: ${error}`;
   const db = getDb();
   const nextAttempt = (Number(slot.retry_count) || 0) + 1;
-  const retryUntilSlot = !qualityFailure && shouldRetryPreparationUntilSlot(kind);
-  const maxAttempts = qualityFailure ? 2 : MAX_CONTENT_PREPARATION_ATTEMPTS;
+  const retryUntilSlot = shouldRetryPreparationUntilSlot(kind);
+  const maxAttempts = MAX_CONTENT_PREPARATION_ATTEMPTS;
   const terminalStatus = qualityFailure ? 'blocked_quality' : retryUntilSlot ? 'blocked_agent' : 'failed';
   const retryAt = Date.now() + contentPreparationRetryDelayMs(Number(slot.retry_count) || 0);
   if (retryAt < slot.slot_time && (retryUntilSlot || nextAttempt < maxAttempts)) {

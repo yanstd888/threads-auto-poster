@@ -279,6 +279,7 @@ assert.ok(normalizeHermesInvocationConfig('THREADS', 'cli').error, 'placeholder 
 assert.equal(shouldRetryPreparationUntilSlot('agent_crash'), true);
 assert.equal(shouldRetryPreparationUntilSlot('invalid_json'), true);
 assert.equal(shouldRetryPreparationUntilSlot('source_transient'), true);
+assert.equal(shouldRetryPreparationUntilSlot('quality_reject'), true);
 assert.equal(shouldRetryPreparationUntilSlot('source_dead'), false);
 assert.equal(isBlockedSourceError('Semua tema/sumber utama untuk pilar ini sudah dipakai dalam 14 hari terakhir'), true);
 const sourceFixtures = [
