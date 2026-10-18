@@ -1,42 +1,94 @@
 <p align="center">
-  <h1 align="center">Threads Auto Poster</h1>
-  <p align="center">A self-hosted workspace for researching, drafting, reviewing, scheduling, and publishing Threads posts.</p>
+  <img src="./docs/images/workflow.svg" alt="Threads Auto Poster workflow" width="100%" />
+</p>
+
+<h1 align="center">Threads Auto Poster</h1>
+
+<p align="center">
+  <strong>Self-hosted Threads scheduling, content research, AI-assisted drafting, approval, and publishing in one private workspace.</strong>
+</p>
+
+<p align="center">
+  Build a reliable Threads content workflow without handing your sources, drafts, schedule, or publishing controls to a third-party SaaS dashboard.
 </p>
 
 <p align="center">
   <a href="#quick-start">Quick start</a> ·
-  <a href="#how-it-works">How it works</a> ·
-  <a href="#documentation">Documentation</a> ·
+  <a href="#features">Features</a> ·
+  <a href="#supported-cli-tools">Supported CLI tools</a> ·
   <a href="#deployment">Deployment</a> ·
-  <a href="#safety">Safety</a>
+  <a href="#safety-model">Safety</a> ·
+  <a href="#documentation">Documentation</a>
 </p>
 
 <p align="center">
-  <img alt="License: Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-blue.svg">
-  <img alt="Runtime: Node.js 22+" src="https://img.shields.io/badge/node.js-22%2B-339933.svg">
-  <img alt="Storage: SQLite" src="https://img.shields.io/badge/storage-SQLite-003B57.svg">
+  <img alt="Release v0.2.0" src="https://img.shields.io/badge/release-v0.2.0-f97316.svg">
+  <img alt="License Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-2563eb.svg">
+  <img alt="Node.js 22 or newer" src="https://img.shields.io/badge/node.js-22%2B-339933.svg">
+  <img alt="SQLite storage" src="https://img.shields.io/badge/storage-SQLite-003B57.svg">
+  <img alt="Self hosted" src="https://img.shields.io/badge/deployment-self--hosted-7c3aed.svg">
 </p>
 
 ---
 
-## Why this exists
+## Why Threads Auto Poster?
 
-Publishing consistently is easier when research, drafting, review, scheduling, and publishing live in one private workspace. Threads Auto Poster keeps that workflow self-hosted with SQLite, a source registry, an approval queue, and optional Threads publishing.
+Consistent publishing is difficult when ideas, source links, drafts, approvals, schedules, and publishing credentials are spread across unrelated tools. **Threads Auto Poster** brings those steps together in a self-hosted dashboard built for creators, marketers, developers, and small teams who want a more controlled Threads automation workflow.
 
-It starts in approval mode. Real publishing stays off until you connect a Threads account and explicitly review a draft.
+Use it as a **Threads content planner**, **source-backed social media scheduler**, **AI-assisted post drafting workspace**, or a lightweight internal publishing console. Start with manual approval, keep the kill switch enabled, and turn on automated publishing only after the complete workflow is verified.
 
-## What it includes
+### What makes it different
 
-| Area | Included |
-| --- | --- |
-| Content | Source-backed drafts, content pillars, compositions, and quality gates |
-| Review | Draft queue, approval-first publishing, post history, and publish status |
-| Schedule | Posts per day, active hours, timezone, active days, and minimum gaps |
-| Sources | HTTPS-only registry with search, filters, health checks, import, and export |
-| AI generation | Optional Hermes CLI integration with configurable provider and model |
-| Threads | OAuth connection, encrypted token storage, and optional publishing |
-| Operations | SQLite WAL, backup/restore scripts, config transfer, and Docker Compose |
-| Access | One admin account, HTTP-only session cookie, and login rate limiting |
+- **Self-hosted by design** — run the dashboard and SQLite data on your own computer or VPS.
+- **Research before writing** — maintain an approved HTTPS source registry and attach source context to content preparation.
+- **Human approval first** — drafts are reviewed before publishing by default.
+- **AI is optional** — the dashboard, scheduling, sources, backups, and Threads connection can run without the content agent.
+- **Operationally boring** — SQLite WAL, backups, config transfer, integrity checks, and scoped Docker commands are included.
+- **Manual updates** — the dashboard can notify users when a newer GitHub Release is available without overwriting the running installation.
+
+## Product preview
+
+The public landing page is intentionally simple: explain the workflow first, then let the operator enable the advanced parts that are actually needed.
+
+<p align="center">
+  <img src="./docs/images/landing-page.png" alt="Threads Auto Poster landing page showing version and product message" width="900" />
+</p>
+
+<p align="center"><sub>Current application landing page, captured from the v0.2.0 build.</sub></p>
+
+## Features
+
+### Content research and planning
+
+- Approved HTTPS source registry with search, filters, health checks, import, and export.
+- Content pillars with active-weight normalization to a total of 100%.
+- Content compositions for hook, structure, CTA, source-link, language, and length rules.
+- Source-aware content preparation with fallback and retry classification.
+- Post history and audit records for operational review.
+
+### Threads content workflow
+
+- Draft, review, approve, schedule, and publish from one dashboard.
+- Standalone posts are the default composition mode.
+- Configurable posts per day, active hours, timezone, active days, and minimum gaps.
+- Approval mode and kill switch protect the first installation.
+- Threads OAuth connection with encrypted token storage in SQLite.
+
+### AI-assisted content generation
+
+- Optional Hermes Agent CLI integration.
+- Provider and model are operator-configurable.
+- Readiness preflight prevents avoidable agent failures.
+- Empty or malformed agent output is rejected instead of being scheduled as content.
+- Retryable source and agent failures can retry until the slot horizon; unknown publish results are not blindly retried.
+
+### Self-hosting and operations
+
+- Native Node.js deployment for installations that need Hermes Agent.
+- Docker Compose deployment for the dashboard, SQLite, scheduler, token storage, and Threads publishing.
+- SQLite WAL mode, foreign keys, busy timeout, integrity checks, and backup/restore scripts.
+- One admin account with HTTP-only session cookies and login rate limiting.
+- Strict production security headers and environment-aware CSP.
 
 ## How it works
 
@@ -47,7 +99,7 @@ Approved HTTPS sources
 Content pillars + compositions
         │
         ▼
-Hermes CLI (optional)
+Hermes Agent CLI (optional)
         │
         ▼
 Draft + quality checks
@@ -56,70 +108,87 @@ Draft + quality checks
 Approval queue ──► Schedule ──► Threads API
 ```
 
-The content agent is optional. You can use the dashboard, sources, scheduling, backups, and Threads connection without it.
+The content agent is not required for the core product. You can use the source registry, dashboard, scheduling controls, backups, and Threads connection without installing Hermes Agent.
 
-The dashboard displays the current version and checks the public GitHub Releases feed for newer releases. Updates remain manual: open the release notice, back up SQLite, pull the tagged source, reinstall dependencies, rebuild, and restart the service. The app never overwrites its own running files from a browser request.
+## Supported CLI Tools
 
-## Quick start
+Threads Auto Poster currently supports **Hermes Agent** as its CLI content-generation runtime. More integrations should only be added when they have a tested command contract, readiness check, timeout policy, and safe failure behavior.
 
-Use the native Node.js workflow when you want content generation through Hermes.
+<p align="center">
+  <img src="./docs/images/supported-cli-tools.svg" alt="Supported CLI tools: Hermes Agent" width="720" />
+</p>
 
-```bash
-cp .env.example .env.local
-npm ci
-npm run dev
-```
+### Hermes Agent setup
 
-Open the URL printed by Next.js. Before signing in, set a strong `ADMIN_PASSWORD`, a random `JWT_SECRET`, and a separate `TOKEN_ENCRYPTION_KEY` in `.env.local`.
-
-Then keep the safe defaults while you set up:
-
-1. Sign in.
-2. Leave posting mode on **Draft (approval required)**.
-3. Keep the **Kill Switch** on.
-4. Add approved sources in **Sumber**.
-5. Configure pillars and compositions in **Pengaturan**.
-6. Verify Hermes before enabling the Content Agent.
-7. Connect Threads only after your public HTTPS callback is ready.
-
-For the complete setup path, including Meta for Developers and OAuth, read [Getting Started](docs/GETTING_STARTED.md).
-
-## Documentation
-
-| Guide | Use it for |
-| --- | --- |
-| [Getting Started](docs/GETTING_STARTED.md) | First install, secrets, admin login, Hermes, Meta Threads, OAuth, publishing, and backups |
-| [Setup](SETUP.md) | Environment variables and deployment details |
-| [Open-source readiness](docs/OPEN_SOURCE_READINESS.md) | Public-release gates that still need proof |
-| [Open-source plan](docs/OPEN_SOURCE_PLAN.md) | Scope and release plan |
-
-## Hermes generation
-
-Install and configure Hermes Agent as the same OS user that runs this app. Verify the exact provider and model before saving them in the dashboard:
+Install and configure Hermes Agent as the same operating-system user that runs Threads Auto Poster. Verify the exact provider and model before saving them in the dashboard:
 
 ```bash
 printf 'Return exactly: HERMES_OK' | hermes chat --query-file - --oneshot --quiet --cli --provider YOUR_PROVIDER -m YOUR_MODEL
 ```
 
-The command must print `HERMES_OK`. Set the exact provider and model names in **Pengaturan**, then enable the Content Agent.
+The command must print `HERMES_OK`. Then configure the matching provider and model in **Pengaturan / Settings** and enable the Content Agent.
 
-`THREADS` can be used as a model only when your Hermes provider defines that model or alias.
+`THREADS` is an example model name used by some operator configurations. It is valid only when the selected Hermes provider defines that model or alias.
 
-## Threads connection
+> Hermes Agent is optional for the public Docker image. The stock image does not bundle the Hermes binary; use native Node.js deployment or provide the CLI inside your own image when AI generation is required.
 
-To publish to Threads, create a Threads app in Meta for Developers, register this exact callback pattern, and place the matching value in `THREADS_OAUTH_REDIRECT_URI`:
+## Quick start
 
-```text
-https://your-domain.example/api/auth/threads/callback
+### 1. Clone the repository
+
+```bash
+git clone https://github.com/yanstd888/threads-auto-poster.git
+cd threads-auto-poster
 ```
 
-Use **Kredensial → Connect Threads** to complete OAuth. The app encrypts the returned token in SQLite. See [Getting Started](docs/GETTING_STARTED.md#5-create-a-threads-app-in-meta-for-developers) for permissions, setup order, and operational checks.
+### 2. Create a local environment
+
+```bash
+cp .env.example .env.local
+```
+
+Set real local values before starting the app. At minimum, use a strong `ADMIN_PASSWORD`, a random `JWT_SECRET`, and a separate `TOKEN_ENCRYPTION_KEY`. Never commit `.env.local`.
+
+### 3. Install and start
+
+```bash
+npm ci
+npm run dev
+```
+
+Open the URL printed by Next.js, then follow the safe first-run sequence:
+
+1. Sign in with the admin password.
+2. Leave **Posting Mode** on **Draft / approval required**.
+3. Keep the **Kill Switch** enabled.
+4. Add approved sources in **Sources / Sumber**.
+5. Configure content pillars and compositions.
+6. Verify Hermes Agent before enabling the Content Agent.
+7. Connect Threads only after the public HTTPS callback is ready.
+
+For the complete setup order, read [Getting Started](docs/GETTING_STARTED.md).
+
+## Configuration
+
+The release uses neutral public defaults:
+
+```text
+timezone=UTC
+hermes_provider=openai-compatible
+hermes_model=default
+threads_username=@your_threads_username
+posting_mode=approval
+kill_switch=true
+content_agent_enabled=false
+```
+
+These defaults are deliberately safe for a fresh clone. Production operators can configure their own provider, model, account, timezone, and publishing mode after verifying the complete environment.
 
 ## Deployment
 
 ### Native Node.js
 
-This is the complete deployment path today because Hermes runs on the application OS:
+Native deployment is the recommended path when Hermes Agent runs on the same operating-system user as the app:
 
 ```bash
 npm ci
@@ -127,7 +196,7 @@ npm run build
 npm run start
 ```
 
-Keep the app behind HTTPS and an access layer when exposing it remotely.
+Keep the application behind HTTPS and a controlled access layer when exposing it remotely. The app itself should remain bound to a private interface or loopback where practical.
 
 ### Docker Compose
 
@@ -137,15 +206,27 @@ cp .env.example .env
 docker compose -f compose.yaml up -d --build
 ```
 
-The stock Docker image runs the dashboard, SQLite, scheduler, token storage, and Threads publishing. It does not include Hermes Agent, so do not enable content generation unless you provide a Hermes CLI inside that container.
-
-The Compose app binds to `127.0.0.1:${APP_PORT:-4000}`. Use a controlled HTTPS ingress such as Cloudflare Tunnel, Caddy, or Nginx for remote access.
+Docker Compose persists the app data outside the image and supports the dashboard, scheduler, SQLite, token storage, and Threads publishing. The stock image does not include Hermes Agent, so AI content generation requires a custom image or native deployment.
 
 Stop only this project:
 
 ```bash
 docker compose -f compose.yaml down
 ```
+
+Do not use broad process commands such as `taskkill /F /IM node.exe` on a machine that hosts other local services.
+
+## Threads connection
+
+To publish to Threads, create a Threads app in Meta for Developers, configure the exact callback URL, and store the matching value in `THREADS_OAUTH_REDIRECT_URI`:
+
+```text
+https://your-domain.example/api/auth/threads/callback
+```
+
+Use **Credentials / Kredensial → Connect Threads** to complete OAuth. The returned token is encrypted before it is stored in SQLite. See [Getting Started](docs/GETTING_STARTED.md) for the required Meta permissions and setup order.
+
+Live Threads posting is intentionally not part of automated repository acceptance. Test with approval mode and an account you control before enabling automatic publishing.
 
 ## Backup and restore
 
@@ -162,25 +243,71 @@ docker compose -f compose.yaml stop app
 THREADS_DATA_DIR=./data RESTORE_CONFIRM=YES bash scripts/restore.sh ./backups/app-YYYYMMDDTHHMMSSZ.db
 ```
 
-The restore script requires `RESTORE_CONFIRM=YES`, checks SQLite integrity, and removes stale WAL sidecars.
+Keep `.env.local`, `data/`, and backups outside Git. The restore path requires explicit confirmation, checks SQLite integrity, and removes stale WAL sidecars.
 
-## Safety
+## Safety model
 
 - Approval mode is the default posting mode.
+- The kill switch is enabled for a new public clone.
 - Standalone posts are the default composition mode.
 - Source URLs must use HTTPS and cannot point to localhost, private, or link-local addresses.
 - Generated content must cite approved sources and pass quality checks before scheduling or publishing.
-- A `publish_unknown` result is not auto-retried because Threads may already have accepted the post.
-- Config export excludes tokens, password hashes, users, kill switch state, history, and runtime database rows.
+- A `publish_unknown` result is not auto-retried because the platform may already have accepted the post.
+- Config export excludes tokens, password hashes, users, kill-switch state, history, generated posts, and runtime database rows.
+- The dashboard never performs a destructive self-update from a browser request.
+- Public release defaults do not contain production credentials, private endpoints, account secrets, or runtime databases.
+
+## Updating from GitHub
+
+The dashboard displays the installed version and checks the public GitHub Releases feed. If a newer release exists, it shows a notification with a link to the release page.
+
+Updates are manual and reviewable:
+
+```bash
+# Back up SQLite first, and keep .env.local/data/backups outside Git
+git fetch origin --tags
+git checkout main
+git pull --ff-only origin main
+npm ci
+npm run build
+```
+
+Then restart the service using the process manager for your deployment. Review the release notes before updating production, and keep the previous release available for rollback.
+
+## Documentation
+
+| Guide | Use it for |
+| --- | --- |
+| [Getting Started](docs/GETTING_STARTED.md) | First install, secrets, admin login, Hermes Agent, Meta Threads, OAuth, publishing, and backups |
+| [Setup](SETUP.md) | Environment variables and deployment details |
+| [Open-source readiness](docs/OPEN_SOURCE_READINESS.md) | Release gates, supported boundaries, and verification evidence |
+| [Open-source plan](docs/OPEN_SOURCE_PLAN.md) | Product scope and release plan |
+| [Changelog](CHANGELOG.md) | Version history and notable changes |
 
 ## Verification
 
+Run the same checks used for a clean release clone:
+
 ```bash
+npm ci
+npm run lint
 npx tsc --noEmit --pretty false
 npx tsx check-content-and-schedule.ts
+npm audit --omit=dev --audit-level=high
 npm run build
+git diff --check
 ```
+
+## Contributing
+
+Issues and pull requests are welcome. Keep changes small, document behavior that affects self-hosting or publishing safety, and include a focused regression check for new parsing, scheduling, retry, security, or data-transfer behavior.
+
+Do not include real `.env` files, SQLite databases, OAuth tokens, provider credentials, private URLs, or personal account data in issues and pull requests.
 
 ## License
 
 Apache-2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
+
+## Disclaimer
+
+Threads is a trademark of Meta Platforms, Inc. This project is an independent open-source tool and is not affiliated with, endorsed by, or sponsored by Meta Platforms, Inc.
