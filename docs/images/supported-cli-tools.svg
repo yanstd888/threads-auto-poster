@@ -15,7 +15,7 @@
   <text x="28" y="70" fill="#94a3b8" font-family="Arial, sans-serif" font-size="15">Content generation currently integrates with one CLI runtime.</text>
   <rect x="28" y="98" width="664" height="120" rx="12" fill="#111827" stroke="#475569"/>
   <rect x="48" y="118" width="80" height="80" rx="16" fill="#ffffff"/>
-  <image href="hermes-agent.png" x="48" y="118" width="80" height="80" preserveAspectRatio="xMidYMid meet"/>
+  <image href="hermes-agent.webp" x="48" y="118" width="80" height="80" preserveAspectRatio="xMidYMid meet"/>
   <text x="150" y="145" fill="#f8fafc" font-family="Arial, sans-serif" font-size="22" font-weight="700">Hermes Agent</text>
   <text x="150" y="173" fill="#cbd5e1" font-family="Arial, sans-serif" font-size="15">Optional AI content generation via the local CLI</text>
   <text x="150" y="197" fill="#94a3b8" font-family="Arial, sans-serif" font-size="13">Provider and model are configured by the self-hosted operator.</text>
