@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "postbuild": "node scripts/prepare-standalone-assets.mjs",
     "start": "next start",
     "start:4000": "next start -p 4000",
     "lint": "eslint"
