@@ -381,6 +381,9 @@ assert.deepEqual((db.prepare('SELECT checkpoint FROM metric_snapshots WHERE post
 db.exec("CREATE TABLE schedule (id INTEGER PRIMARY KEY, slot_time INTEGER NOT NULL, pillar TEXT, status TEXT NOT NULL, retry_at INTEGER)");
 db.prepare("INSERT INTO schedule (id, slot_time, status, retry_at) VALUES (1, 2_000, 'retrying', 5_000), (2, 10_000, 'pending', NULL)").run();
 assert.equal(getNextPreparationSlot(db, 1_000)?.id, 1, 'earlier retry must block later-day preparation');
+db.prepare("INSERT INTO schedule (id, slot_time, status, retry_at) VALUES (8, 3_000, 'retrying', 900)").run();
+assert.equal(getNextPreparationSlot(db, 1_000)?.id, 8, 'an overdue retry must outrank an earlier retry that is not due yet');
+db.prepare('DELETE FROM schedule WHERE id = 8').run();
 db.prepare("INSERT INTO posts (id, content, status, schedule_id) VALUES (3, 'rejected', 'quality_failed', 1)").run();
 assert.equal(getNextPreparationSlot(db, 1_000)?.id, 1, 'rejected content must remain available as retry context');
 db.prepare("INSERT INTO posts (id, content, status, schedule_id) VALUES (4, 'ready', 'scheduled', 1)").run();
