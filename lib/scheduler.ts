@@ -432,8 +432,13 @@ export function getNextPreparationSlot(db: DatabaseSync, now: number, pillar?: s
       AND NOT EXISTS (
         SELECT 1 FROM posts p WHERE p.schedule_id = s.id AND p.status <> 'quality_failed'
       )
-    ORDER BY s.slot_time ASC LIMIT 1
-  `).get(now - PREPARATION_LOOKBACK_MS, now + PREPARATION_HORIZON_MS, ...(pillar ? [pillar] : [])) as ScheduleRow | undefined;
+    -- An overdue retry must not wait behind another future retry in the same pillar.
+    ORDER BY
+      CASE WHEN s.status = 'retrying' AND COALESCE(s.retry_at, 0) <= ? THEN 0 ELSE 1 END,
+      CASE WHEN s.status = 'retrying' AND COALESCE(s.retry_at, 0) <= ? THEN COALESCE(s.retry_at, s.slot_time) ELSE s.slot_time END ASC,
+      s.slot_time ASC
+    LIMIT 1
+  `).get(now - PREPARATION_LOOKBACK_MS, now + PREPARATION_HORIZON_MS, ...(pillar ? [pillar] : []), now) as ScheduleRow | undefined;
   return slot || null;
 }
 
