@@ -7,4 +7,7 @@ const root = resolve(import.meta.dirname, '..');
 const index = await readFile(resolve(root, 'site/index.html'), 'utf8');
 for (const value of ['lang="id"', 'data-lang="id"', 'data-lang="en"', 'application/ld+json', 'dashboard-preview.png']) assert.ok(index.includes(value), `missing ${value}`);
 for (const file of ['site/styles.css', 'site/app.js', 'site/robots.txt', 'site/sitemap.xml', 'site/assets/dashboard-preview.png']) await access(resolve(root, file), constants.R_OK);
+const en = await readFile(resolve(root, '.pages/en/index.html'), 'utf8');
+for (const value of ['lang="en"', '../styles.css', '../assets/dashboard-preview.png', '../app.js']) assert.ok(en.includes(value), `missing English asset path ${value}`);
+assert.ok(!en.includes('src="./assets/dashboard-preview.png"'), 'English page must not point at a nonexistent nested asset');
 console.log('PASS project site assets, bilingual copy, and SEO metadata');

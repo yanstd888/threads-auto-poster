@@ -12,9 +12,10 @@ function page(language) {
   html = html.replace('lang="id"', `lang="${language}"`);
   html = html.replace('data-active="id"', `data-active="${language}"`);
   if (language === 'en') {
-    html = html.replace('Threads Auto Poster — Self-hosted Threads scheduler</title>', 'Threads Auto Poster — Self-hosted Threads scheduler</title>');
     html = html.replace('content="Threads Auto Poster adalah scheduler Threads self-hosted dengan riset sumber, draft berbantuan AI, quality gate, dan approval sebelum publikasi."', 'content="Threads Auto Poster is a self-hosted Threads scheduler with source research, AI-assisted drafts, quality gates, and approval before publishing."');
     html = html.replace('href="https://yanstd888.github.io/threads-auto-poster/"', 'href="https://yanstd888.github.io/threads-auto-poster/en/"');
+    // ponytail: the English page is one directory deeper, so reuse root assets instead of duplicating the screenshot and styles.
+    html = html.replaceAll('./styles.css', '../styles.css').replaceAll('./assets/', '../assets/').replaceAll('./app.js', '../app.js');
   }
   return html;
 }
