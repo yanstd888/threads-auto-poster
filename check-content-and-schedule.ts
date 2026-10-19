@@ -330,6 +330,20 @@ assert.equal(parseHermesOutput('{"text":"   ","replies":[]}', {
   keywords: ['AI agent'], avoidTopics: [], sources: ['https://example.com'], maxLength: 500,
 }).error, 'Hermes output tidak berisi JSON konten yang valid');
 
+const rebalancedDb = new DatabaseSync(':memory:');
+rebalancedDb.exec(`
+  PRAGMA foreign_keys = ON;
+  CREATE TABLE schedule (id INTEGER PRIMARY KEY);
+  CREATE TABLE posts (id INTEGER PRIMARY KEY, schedule_id INTEGER, status TEXT NOT NULL, threads_id TEXT, FOREIGN KEY (schedule_id) REFERENCES schedule(id));
+  CREATE TABLE post_attributes (post_id INTEGER PRIMARY KEY, FOREIGN KEY (post_id) REFERENCES posts(id));
+`);
+rebalancedDb.exec("INSERT INTO schedule VALUES (1); INSERT INTO posts VALUES (1, 1, 'scheduled', NULL); INSERT INTO post_attributes VALUES (1);");
+rebalancedDb.prepare("UPDATE posts SET status = 'superseded', schedule_id = NULL WHERE id = ? AND schedule_id = ? AND threads_id IS NULL").run(1, 1);
+const supersededRow = rebalancedDb.prepare('SELECT status, schedule_id FROM posts WHERE id = 1').get() as { status: string; schedule_id: number | null };
+assert.equal(supersededRow.status, 'superseded', 'schedule rebalance must preserve dependent post records');
+assert.equal(supersededRow.schedule_id, null);
+assert.equal((rebalancedDb.prepare('SELECT COUNT(*) AS count FROM post_attributes WHERE post_id = 1').get() as { count: number }).count, 1);
+
 const db = new DatabaseSync(':memory:');
 db.exec('CREATE TABLE audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT, action TEXT NOT NULL, details TEXT, created_at INTEGER NOT NULL)');
 db.exec(`CREATE TABLE posts (

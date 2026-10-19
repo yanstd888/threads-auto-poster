@@ -584,7 +584,8 @@ function rebalanceFutureSchedule(config: ScheduleConfig) {
       if (protectedPost) continue;
 
       if (row.post_id && changedPillar) {
-        db.prepare('DELETE FROM posts WHERE id = ? AND schedule_id = ? AND threads_id IS NULL').run(row.post_id, row.id);
+        // ponytail: retain child metrics/attributes and release this unposted draft from the slot instead of deleting through foreign keys.
+        db.prepare("UPDATE posts SET status = 'superseded', schedule_id = NULL WHERE id = ? AND schedule_id = ? AND threads_id IS NULL").run(row.post_id, row.id);
         deletedPosts++;
       }
       if (changedPillar || !row.post_id) {
