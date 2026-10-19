@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://yanstd888.github.io/threads-auto-poster/sitemap.xml

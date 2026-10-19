@@ -13,6 +13,7 @@
 </p>
 
 <p align="center">
+  <a href="https://yanstd888.github.io/threads-auto-poster/">Project site</a> ·
   <a href="#quick-start">Quick start</a> ·
   <a href="#features">Features</a> ·
   <a href="#supported-cli-tools">Supported CLI tools</a> ·
