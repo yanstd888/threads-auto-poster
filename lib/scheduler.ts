@@ -470,18 +470,17 @@ export function shouldRetryPreparationUntilSlot(kind: PreparationErrorKind): boo
   return kind === 'source_transient' || kind === 'agent_timeout' || kind === 'agent_crash' || kind === 'invalid_json' || kind === 'quality_reject';
 }
 
-function markPreparationRetry(slot: ScheduleRow, error: string, qualityFailure = false) {
+function markPreparationRetry(slot: ScheduleRow, error: string) {
   const kind = classifyPreparationError(error);
   const labeledError = `${kind}: ${error}`;
   const db = getDb();
   const nextAttempt = (Number(slot.retry_count) || 0) + 1;
   const retryUntilSlot = shouldRetryPreparationUntilSlot(kind);
-  const maxAttempts = MAX_CONTENT_PREPARATION_ATTEMPTS;
-  const terminalStatus = qualityFailure ? 'blocked_quality' : retryUntilSlot ? 'blocked_agent' : 'failed';
+  const terminalStatus = kind === 'quality_reject' ? 'blocked_quality' : retryUntilSlot ? 'blocked_agent' : 'failed';
   const retryAt = Date.now() + contentPreparationRetryDelayMs(Number(slot.retry_count) || 0);
-  if (retryAt < slot.slot_time && (retryUntilSlot || nextAttempt < maxAttempts)) {
+  if (retryAt < slot.slot_time && retryUntilSlot) {
     db.prepare("UPDATE schedule SET status = 'retrying', retry_at = ?, retry_count = ?, last_error = ? WHERE id = ?").run(retryAt, nextAttempt, labeledError, slot.id);
-    logAudit('schedule_prepare_retry', `slot ${slot.id}: retry ${nextAttempt}${retryUntilSlot ? ' until slot' : `/${maxAttempts}`} in ${Math.round((retryAt - Date.now()) / 1000)}s: ${labeledError}`);
+    logAudit('schedule_prepare_retry', `slot ${slot.id}: retry ${nextAttempt} until slot in ${Math.round((retryAt - Date.now()) / 1000)}s: ${labeledError}`);
     return;
   }
   db.prepare("UPDATE schedule SET status = ?, retry_at = NULL, retry_count = ?, last_error = ? WHERE id = ?").run(terminalStatus, nextAttempt, labeledError, slot.id);
@@ -525,7 +524,7 @@ async function prepareOnePendingSlot(pillar: string) {
           logAudit('schedule_prepare_failed', `slot ${slot.id}: blocked_source: ${preparationError}`);
         } else markPreparationRetry(slot, preparationError);
       } else if (!result.qualityPassed) {
-        markPreparationRetry(slot, 'quality_gate', true);
+        markPreparationRetry(slot, 'quality_gate');
       } else {
         db.prepare("UPDATE schedule SET status = 'pending', retry_at = NULL, last_error = NULL WHERE id = ?").run(slot.id);
         logAudit('schedule_prepared', `slot ${slot.id}: post=${result.postId} status=${result.status}`);
