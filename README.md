@@ -23,7 +23,7 @@
 </p>
 
 <p align="center">
-  <img alt="Release v0.3.1" src="https://img.shields.io/badge/release-v0.3.1-f97316.svg">
+  <img alt="Release v0.3.2" src="https://img.shields.io/badge/release-v0.3.2-f97316.svg">
   <img alt="License Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-2563eb.svg">
   <img alt="Node.js 22 or newer" src="https://img.shields.io/badge/node.js-22%2B-339933.svg">
   <img alt="SQLite storage" src="https://img.shields.io/badge/storage-SQLite-003B57.svg">
