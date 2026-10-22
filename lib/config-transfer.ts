@@ -1,5 +1,5 @@
 import type { DatabaseSync } from 'node:sqlite';
-import { EXPORTABLE_SETTING_KEYS, validateScheduleWindow, validateSettingValue } from './settings-validation';
+import { EXPORTABLE_SETTING_KEYS, validateReplyScheduleWindow, validateScheduleWindow, validateSettingValue } from './settings-validation';
 import { isSafeSourceUrl } from './source-url';
 import { isValidPillarSlug, isValidPillarSourcePolicy, normalizeContentPillarWeights, type PillarLocale } from './content-pillars';
 import { isValidCompositionSlug, type ContentComposition } from './content-compositions';
@@ -177,11 +177,15 @@ export function validateConfigImport(input: unknown): { config: ConfigExport } |
     settings[key] = value;
   }
   const mergedSettings = { ...settings };
-  for (const key of ['posts_per_day', 'active_hours_start', 'active_hours_end'] as const) {
+  for (const key of ['posts_per_day', 'active_hours_start', 'active_hours_end', 'minimum_post_gap_minutes'] as const) {
     if (!mergedSettings[key]) mergedSettings[key] = key === 'posts_per_day' ? '3' : key === 'active_hours_start' ? '8' : '20';
   }
-  for (const key of ['posts_per_day', 'active_hours_start', 'active_hours_end']) {
+  for (const key of ['posts_per_day', 'active_hours_start', 'active_hours_end', 'minimum_post_gap_minutes']) {
     const error = validateScheduleWindow(key, mergedSettings[key], mergedSettings);
+    if (error) return { error };
+  }
+  for (const key of ['reply_active_hours_start', 'reply_active_hours_end']) {
+    const error = validateReplyScheduleWindow(key, mergedSettings[key] || (key.endsWith('start') ? '8' : '20'), mergedSettings);
     if (error) return { error };
   }
 

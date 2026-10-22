@@ -35,7 +35,7 @@ export function pruneExpiredSourceSnapshots(db: ReturnType<typeof getDb>, now = 
   return Number(db.prepare('DELETE FROM source_snapshots WHERE expires_at IS NOT NULL AND expires_at <= ?').run(now).changes);
 }
 
-export function selectSourcesForContext(sources: ApprovedSource[], maxSources = MAX_CONTEXT_SOURCES): ApprovedSource[] {
+export function selectSourcesForContext(sources: ApprovedSource[], maxSources = MAX_CONTEXT_SOURCES, requireGitHubResource = false): ApprovedSource[] {
   const selected: ApprovedSource[] = [];
   const selectedHosts = new Set<string>();
   const add = (source: ApprovedSource) => {
@@ -44,8 +44,13 @@ export function selectSourcesForContext(sources: ApprovedSource[], maxSources = 
     selectedHosts.add(sourceHost(source.url));
   };
 
-  const resource = sources.find(source => isGitHubRepositoryUrl(source.url));
-  if (resource) add(resource);
+  const resources = sources.filter(source => isGitHubRepositoryUrl(source.url));
+  if (requireGitHubResource) {
+    for (const resource of resources) {
+      if (selected.length >= maxSources) return selected;
+      add(resource);
+    }
+  } else if (resources[0]) add(resources[0]);
 
   // ponytail: three distinct hosts give the hook broader evidence without re-growing the prompt.
   for (const source of sources) {
@@ -59,16 +64,16 @@ export function selectSourcesForContext(sources: ApprovedSource[], maxSources = 
   return selected;
 }
 
-export function selectSourceFetchBatches(sources: ApprovedSource[]): ApprovedSource[][] {
-  const candidates = selectSourcesForContext(sources, Math.min(sources.length, MAX_SOURCE_FETCH_CANDIDATES));
+export function selectSourceFetchBatches(sources: ApprovedSource[], requireGitHubResource = false): ApprovedSource[][] {
+  const candidates = selectSourcesForContext(sources, Math.min(sources.length, MAX_SOURCE_FETCH_CANDIDATES), requireGitHubResource);
   return Array.from({ length: Math.ceil(candidates.length / MAX_CONTEXT_SOURCES) }, (_, index) =>
     candidates.slice(index * MAX_CONTEXT_SOURCES, (index + 1) * MAX_CONTEXT_SOURCES),
   );
 }
 
-export async function fetchCurrentSourceContext(sources: ApprovedSource[]): Promise<SourceContext | { error: string }> {
+export async function fetchCurrentSourceContext(sources: ApprovedSource[], requireGitHubResource = false): Promise<SourceContext | { error: string }> {
   const usable: { url: string; text: string }[] = [];
-  for (const selectedSources of selectSourceFetchBatches(sources)) {
+  for (const selectedSources of selectSourceFetchBatches(sources, requireGitHubResource)) {
     const fetched = await Promise.all(selectedSources.map(async source => {
       const db = getDb();
       const now = Date.now();

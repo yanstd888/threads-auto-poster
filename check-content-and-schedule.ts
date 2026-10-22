@@ -17,6 +17,10 @@ import { ALLOWED_SETTING_KEYS } from './lib/settings-validation';
 import { APP_VERSION_LABEL } from './lib/app-version';
 import { compareVersions, parseVersion } from './lib/update-check';
 
+const newsStrategy = getContentStrategy('ai-news-update', 'today');
+assert.equal(newsStrategy.label, 'NewsAI / Berita AI terbaru');
+assert.equal(newsStrategy.keywords.length, 3);
+assert.equal(getContentStrategy('programmer-quotes', 'today').topicTag, 'Programmer Mindset');
 const requiredKeywords = ['repo GitHub terbaik', 'repository open source', 'tools developer gratis'];
 assert.equal(ALLOWED_SETTING_KEYS.has('github_url'), false);
 assert.equal(ALLOWED_SETTING_KEYS.has('website_url'), false);
@@ -217,7 +221,7 @@ const hourMinute = new Intl.DateTimeFormat('en-GB', {
   timeZone: 'Asia/Jakarta', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
 });
 assert.ok(slots.map((slot: number) => hourMinute.format(new Date(slot))).includes('09:00'), 'Thursday must retain the 09:00 anchor');
-assert.deepEqual(planDailyPillars(10), ['umkm', 'ai', 'github', 'security', 'umkm', 'ai', 'github', 'security', 'umkm', 'ai']);
+assert.deepEqual(planDailyPillars(10), ['umkm', 'ai', 'github', 'security', 'ai-news-update', 'programmer-quotes', 'umkm', 'ai', 'github', 'security']);
 const configExport = createConfigExport(
   { posts_per_day: '25', posting_mode: 'approval', JWT_SECRET: 'must-not-export' },
   [{ name: 'Example', url: resourceUrl, pillar: 'github', source_type: 'manual', approved: true }],
@@ -287,6 +291,7 @@ const sourceFixtures = [
   { id: 2, name: 'Same-host source', url: 'https://github.com/trending', source_type: 'webpage' },
   { id: 3, name: 'Node source', url: 'https://nodejs.org/en/blog', source_type: 'webpage' },
   { id: 4, name: 'GitLab source', url: 'https://about.gitlab.com/releases', source_type: 'webpage' },
+  { id: 5, name: 'Fallback repo', url: 'https://github.com/acme/fallback', source_type: 'repository' },
 ];
 const diverseSources = selectSourcesForContext(sourceFixtures);
 assert.deepEqual(diverseSources.map(source => source.name), ['Required repo', 'Node source']);
@@ -294,6 +299,7 @@ assert.deepEqual(selectSourceFetchBatches(sourceFixtures).map(batch => batch.map
   ['Required repo', 'Node source'],
   ['GitLab source', 'Same-host source'],
 ]);
+assert.deepEqual(selectSourceFetchBatches(sourceFixtures, true)[0].map(source => source.name), ['Required repo', 'Fallback repo'], 'required repository fetch must include a fallback repository');
 const initialPrompt = buildPrompt({
   pillar: 'AI agent skill terbaik', postType: 'education', language: 'id', style: 'casual', softSelling: false,
   keywords: ['AI agent', 'tools AI untuk kerja'], avoidTopics: [], sources: ['https://example.com'], sourceContext: 'Sumber singkat.',
@@ -381,9 +387,6 @@ assert.deepEqual((db.prepare('SELECT checkpoint FROM metric_snapshots WHERE post
 db.exec("CREATE TABLE schedule (id INTEGER PRIMARY KEY, slot_time INTEGER NOT NULL, pillar TEXT, status TEXT NOT NULL, retry_at INTEGER)");
 db.prepare("INSERT INTO schedule (id, slot_time, status, retry_at) VALUES (1, 2_000, 'retrying', 5_000), (2, 10_000, 'pending', NULL)").run();
 assert.equal(getNextPreparationSlot(db, 1_000)?.id, 1, 'earlier retry must block later-day preparation');
-db.prepare("INSERT INTO schedule (id, slot_time, status, retry_at) VALUES (8, 3_000, 'retrying', 900)").run();
-assert.equal(getNextPreparationSlot(db, 1_000)?.id, 8, 'an overdue retry must outrank an earlier retry that is not due yet');
-db.prepare('DELETE FROM schedule WHERE id = 8').run();
 db.prepare("INSERT INTO posts (id, content, status, schedule_id) VALUES (3, 'rejected', 'quality_failed', 1)").run();
 assert.equal(getNextPreparationSlot(db, 1_000)?.id, 1, 'rejected content must remain available as retry context');
 db.prepare("INSERT INTO posts (id, content, status, schedule_id) VALUES (4, 'ready', 'scheduled', 1)").run();

@@ -16,10 +16,12 @@ export interface ContentPillar {
 }
 
 export const DEFAULT_CONTENT_PILLARS: ContentPillar[] = [
-  { slug: 'umkm', name: 'Website untuk UMKM', enabled: true, weight: 30, locale: 'id', source_policy: 'any', promo_eligible: true, position: 0 },
-  { slug: 'ai', name: 'AI agent skill terbaik', enabled: true, weight: 25, locale: 'id', source_policy: 'github_repository', promo_eligible: false, position: 1 },
-  { slug: 'github', name: 'GitHub repo terbaik', enabled: true, weight: 25, locale: 'id', source_policy: 'github_repository', promo_eligible: false, position: 2 },
-  { slug: 'security', name: 'Cyber security', enabled: true, weight: 20, locale: 'id', source_policy: 'any', promo_eligible: false, position: 3 },
+  { slug: 'umkm', name: 'Website untuk UMKM', enabled: true, weight: 25, locale: 'id', source_policy: 'any', promo_eligible: true, position: 0 },
+  { slug: 'ai', name: 'AI agent skill terbaik', enabled: true, weight: 20, locale: 'id', source_policy: 'github_repository', promo_eligible: false, position: 1 },
+  { slug: 'github', name: 'GitHub repo terbaik', enabled: true, weight: 20, locale: 'id', source_policy: 'github_repository', promo_eligible: false, position: 2 },
+  { slug: 'security', name: 'Cyber security', enabled: true, weight: 15, locale: 'id', source_policy: 'any', promo_eligible: false, position: 3 },
+  { slug: 'ai-news-update', name: 'NewsAI / Berita AI terbaru', enabled: true, weight: 10, locale: 'id', source_policy: 'any', promo_eligible: false, position: 4 },
+  { slug: 'programmer-quotes', name: 'Quotes of the day — Programmer/VibeCoder', enabled: true, weight: 10, locale: 'id', source_policy: 'any', promo_eligible: false, position: 5 },
 ];
 
 export function getContentPillars(db: DatabaseSync = getDb(), enabledOnly = false): ContentPillar[] {

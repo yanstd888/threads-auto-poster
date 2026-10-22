@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import Image from 'next/image';
 import { usePathname, useRouter } from 'next/navigation';
-import { LayoutDashboard, Calendar, FileText, Settings, Shield, BarChart3, LogOut, ExternalLink } from 'lucide-react';
+import { LayoutDashboard, Calendar, FileText, Settings, Shield, BarChart3, LogOut, ExternalLink, MessageCircle } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { I18nProvider, useI18n, type AppLocale } from '@/lib/i18n';
 import { OFFICIAL_GITHUB_URL, OFFICIAL_STORE_URL, OFFICIAL_WEBSITE_URL } from '@/lib/brand-links';
@@ -13,6 +13,7 @@ const menuItems = [
   { icon: LayoutDashboard, key: 'dashboard', href: '/dashboard' },
   { icon: Calendar, key: 'schedule', href: '/dashboard/schedule' },
   { icon: FileText, key: 'content', href: '/dashboard/posts' },
+  { icon: MessageCircle, key: 'replies', href: '/dashboard/replies' },
   { icon: BarChart3, key: 'analytics', href: '/dashboard/analytics' },
   { icon: Shield, key: 'credentials', href: '/dashboard/credentials' },
   { icon: ExternalLink, key: 'sources', href: '/dashboard/sources' },
@@ -71,7 +72,7 @@ function DashboardShell({ children, settings, update }: { children: React.ReactN
     router.push('/login');
   };
 
-  const label = (key: (typeof menuItems)[number]['key']) => key === 'dashboard' ? t.dashboard : key === 'schedule' ? t.schedule : key === 'content' ? t.content : key === 'sources' ? t.sources : key === 'settings' ? t.settings : key === 'analytics' ? (locale === 'en' ? 'Analytics' : 'Analitik') : (locale === 'en' ? 'Credentials' : 'Kredensial');
+  const label = (key: (typeof menuItems)[number]['key']) => key === 'dashboard' ? t.dashboard : key === 'schedule' ? t.schedule : key === 'content' ? t.content : key === 'replies' ? t.replies : key === 'sources' ? t.sources : key === 'settings' ? t.settings : key === 'analytics' ? (locale === 'en' ? 'Analytics' : 'Analitik') : (locale === 'en' ? 'Credentials' : 'Kredensial');
 
   return (
     <div className="brutal-app flex min-h-[100dvh] overflow-hidden">

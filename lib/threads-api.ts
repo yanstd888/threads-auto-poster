@@ -87,6 +87,34 @@ export type ThreadsPublishResult =
   | { partial: true; id: string; url: string; verified: boolean; replyIds: string[]; error: string }
   | { error: string; safeToRetry: boolean };
 
+export interface ThreadsPublishingLimit {
+  quotaUsage: number;
+  quotaTotal: number;
+  quotaDuration: number;
+}
+
+export function parseThreadsPublishingLimit(data: unknown): ThreadsPublishingLimit | null {
+  const row = Array.isArray((data as { data?: unknown[] })?.data) ? (data as { data: unknown[] }).data[0] : data;
+  if (!row || typeof row !== 'object') return null;
+  const value = row as { quota_usage?: unknown; config?: { quota_total?: unknown; quota_duration?: unknown } };
+  const quotaUsage = Number(value.quota_usage);
+  const quotaTotal = Number(value.config?.quota_total);
+  const quotaDuration = Number(value.config?.quota_duration);
+  return Number.isInteger(quotaUsage) && Number.isInteger(quotaTotal) && quotaTotal > 0 && Number.isInteger(quotaDuration) && quotaDuration > 0
+    ? { quotaUsage, quotaTotal, quotaDuration }
+    : null;
+}
+
+async function getThreadsPublishingLimit(userId: string, accessToken: string): Promise<ThreadsPublishingLimit | { error: string }> {
+  const url = new URL(`${THREADS_API_BASE}/${userId}/threads_publishing_limit`);
+  url.searchParams.set('fields', 'quota_usage,config');
+  url.searchParams.set('access_token', accessToken);
+  const response = await fetch(url.toString());
+  const data = await response.json();
+  const limit = response.ok ? parseThreadsPublishingLimit(data) : null;
+  return limit || { error: data?.error?.message || 'Threads publishing limit tidak tersedia' };
+}
+
 export function createThreadsContainerUrl(userId: string, accessToken: string, text: string, replyToId?: string, topicTag?: string): URL {
   const url = new URL(`${THREADS_API_BASE}/${userId}/threads`);
   url.searchParams.set('media_type', 'TEXT');
@@ -115,6 +143,17 @@ export async function postToThreads(post: { text: string; replies: string[]; top
     if (!meRes.ok || !meData.id) {
       const error = meData.error?.message || 'Failed to load Threads account';
       logAudit('threads_error', `identity: ${error}`);
+      return { error, safeToRetry: true };
+    }
+
+    const limit = await getThreadsPublishingLimit(meData.id, accessToken);
+    if ('error' in limit) {
+      logAudit('threads_limit_error', limit.error);
+      return { error: limit.error, safeToRetry: true };
+    }
+    if (limit.quotaUsage >= limit.quotaTotal) {
+      const error = `Kuota root post Threads habis (${limit.quotaUsage}/${limit.quotaTotal} dalam ${Math.round(limit.quotaDuration / 3600)} jam)`;
+      logAudit('threads_limit_reached', error);
       return { error, safeToRetry: true };
     }
 
@@ -198,6 +237,67 @@ export async function postToThreads(post: { text: string; replies: string[]; top
     logAudit('threads_error', message);
     return { error: message, safeToRetry: false };
   }
+}
+
+export type ThreadsReplyPublishResult =
+  | { id: string; url: string; verified: boolean }
+  | { id?: string; url?: string; error: string; safeToRetry: boolean; ambiguous: boolean; status?: number };
+
+export async function postReplyToThreads(text: string, replyToId: string): Promise<ThreadsReplyPublishResult> {
+  const targetId = replyToId.trim();
+  if (!targetId) return { error: 'reply_to_id wajib untuk publish reply', safeToRetry: false, ambiguous: false };
+  const token = await getFreshThreadsToken();
+  if ('error' in token) return { error: token.error, safeToRetry: true, ambiguous: false };
+  try {
+    const meUrl = new URL(`${THREADS_API_BASE}/me`);
+    meUrl.searchParams.set('fields', 'id,username');
+    meUrl.searchParams.set('access_token', token.token);
+    const meResponse = await fetch(meUrl.toString());
+    const meData: unknown = await meResponse.json();
+    if (!meResponse.ok || !isRecord(meData) || typeof meData.id !== 'string') {
+      return { error: readThreadsError(meData, 'Failed to load Threads account'), safeToRetry: meResponse.status < 500, ambiguous: meResponse.status >= 500, status: meResponse.status };
+    }
+
+    const containerUrl = createThreadsContainerUrl(meData.id, token.token, text, targetId);
+    const containerResponse = await fetch(containerUrl.toString(), { method: 'POST' });
+    const containerData: unknown = await containerResponse.json();
+    if (!containerResponse.ok || !isRecord(containerData) || typeof containerData.id !== 'string') {
+      return { error: readThreadsError(containerData, 'Failed to create reply container'), safeToRetry: containerResponse.status < 500, ambiguous: containerResponse.status >= 500, status: containerResponse.status };
+    }
+
+    const publishUrl = new URL(`${THREADS_API_BASE}/${meData.id}/threads_publish`);
+    publishUrl.searchParams.set('creation_id', containerData.id);
+    publishUrl.searchParams.set('access_token', token.token);
+    const publishResponse = await fetch(publishUrl.toString(), { method: 'POST' });
+    const publishData: unknown = await publishResponse.json();
+    if (!publishResponse.ok || !isRecord(publishData) || typeof publishData.id !== 'string') {
+      return { error: readThreadsError(publishData, 'Failed to publish reply'), safeToRetry: publishResponse.status < 500, ambiguous: publishResponse.status >= 500, status: publishResponse.status };
+    }
+
+    const fallbackUrl = `https://www.threads.net/@${typeof meData.username === 'string' ? meData.username : getSetting('threads_username') || 'your_threads_username'}/post/${publishData.id}`;
+    const verifyUrl = new URL(`${THREADS_API_BASE}/${publishData.id}`);
+    verifyUrl.searchParams.set('fields', 'id,permalink');
+    verifyUrl.searchParams.set('access_token', token.token);
+    const verifyResponse = await fetch(verifyUrl.toString());
+    const verifyData: unknown = await verifyResponse.json();
+    if (!verifyResponse.ok || !isRecord(verifyData) || verifyData.id !== publishData.id || typeof verifyData.permalink !== 'string') {
+      return { id: publishData.id, url: fallbackUrl, error: readThreadsError(verifyData, 'Read-back failed after reply publish'), safeToRetry: false, ambiguous: true, status: verifyResponse.status };
+    }
+    return { id: publishData.id, url: verifyData.permalink, verified: true };
+  } catch (error: unknown) {
+    return { error: error instanceof Error ? error.message : 'Threads reply request failed', safeToRetry: false, ambiguous: true };
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function readThreadsError(value: unknown, fallback: string): string {
+  if (!isRecord(value)) return fallback;
+  const error = value.error;
+  if (isRecord(error) && typeof error.message === 'string') return error.message;
+  return fallback;
 }
 
 export const THREADS_LIMITS = {

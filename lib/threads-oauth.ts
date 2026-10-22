@@ -12,13 +12,19 @@ export function getThreadsAppConfig(): { appId: string; appSecret: string; redir
   return { appId, appSecret, redirectUri };
 }
 
-export function buildAuthorizeUrl(state: string): string | null {
+export interface ThreadsAuthorizeOptions {
+  includeReplyDiscovery?: boolean;
+}
+
+export function buildAuthorizeUrl(state: string, options: ThreadsAuthorizeOptions = {}): string | null {
   const config = getThreadsAppConfig();
   if (!config) return null;
+  const scopes = ['threads_basic', 'threads_content_publish', 'threads_manage_insights', 'threads_manage_replies'];
+  if (options.includeReplyDiscovery) scopes.push('threads_keyword_search', 'threads_profile_discovery', 'threads_read_replies');
   const params = new URLSearchParams({
     client_id: config.appId,
     redirect_uri: config.redirectUri,
-    scope: 'threads_basic,threads_content_publish,threads_manage_insights,threads_manage_replies',
+    scope: scopes.join(','),
     response_type: 'code',
     state,
   });
