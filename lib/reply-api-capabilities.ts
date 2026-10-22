@@ -1,4 +1,4 @@
-import { getSetting, logAudit } from './db';
+import { logAudit } from './db';
 import { getFreshThreadsToken } from './threads-api';
 
 export const THREADS_REPLY_SCOPES = [
@@ -43,10 +43,11 @@ export interface ThreadsIdentity {
 }
 
 export interface ThreadsPublicProfile {
-  id: string;
+  id?: string;
   username: string;
   name?: string;
-  threads_biography?: string;
+  profile_picture_url?: string;
+  biography?: string;
   is_verified?: boolean;
 }
 
@@ -108,7 +109,7 @@ export async function getThreadsIdentity(): Promise<ThreadsApiResult<ThreadsIden
 }
 
 export async function lookupThreadsProfile(username: string): Promise<ThreadsApiResult<ThreadsPublicProfile>> {
-  return requestThreadsJson<ThreadsPublicProfile>('/profile_lookup', { username, fields: 'id,username,name,threads_biography,is_verified' });
+  return requestThreadsJson<ThreadsPublicProfile>('/profile_lookup', { username, fields: 'username,name,profile_picture_url,biography,is_verified' });
 }
 
 export async function fetchThreadsProfilePosts(input: ProfilePostsInput): Promise<ThreadsApiResult<ThreadsPublicPost[]>> {
@@ -184,7 +185,9 @@ export async function probeReplyCapabilities(): Promise<ReplyCapabilityReport> {
 
   const [keyword, profile, quota] = await Promise.all([
     searchThreadsPosts({ query: '__threads_reply_capability_probe__', searchMode: 'KEYWORD', searchType: 'RECENT', limit: 1 }),
-    lookupThreadsProfile(identity.data.username || getSetting('threads_username') || '__threads_reply_capability_probe__'),
+    // @meta is Meta's documented Standard Access probe target. An arbitrary profile
+    // can still need Advanced Access and must be checked during target discovery.
+    lookupThreadsProfile('meta'),
     getReplyPublishingLimit(),
   ]);
   const keywordSupported = keyword.ok;
@@ -198,7 +201,12 @@ export async function probeReplyCapabilities(): Promise<ReplyCapabilityReport> {
     username: identity.data.username,
     accountId: identity.data.id,
     keywordSearch: { supported: keywordSupported, ...(keyword.ok ? {} : { reason: keyword.error.error }) },
-    profileDiscovery: { supported: profileSupported, ...(profile.ok ? {} : { reason: profile.error.error }) },
+    profileDiscovery: {
+      supported: profileSupported,
+      reason: profile.ok
+        ? 'Probe @meta lulus. Target publik non-Meta tetap memerlukan Advanced Access dan kelayakan profil Meta.'
+        : profile.error.error,
+    },
     replyPublishing: { supported: replySupported, ...(quota.ok ? {} : { reason: quota.error.error }) },
     replyQuota: quota.ok ? quota.data : null,
     quotaError,

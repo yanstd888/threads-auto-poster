@@ -18,6 +18,7 @@ const HARD_SELLING = /\b(?:beli|order|pesan|diskon|harga|promo|jasa|konsultasi|c
 const FABRICATED_CLAIM = /\b(?:klien|client|customer)\s+(?:saya|kami|aku)|\b(?:omzet|revenue|pendapatan|konversi|conversion)\b.{0,40}\b(?:naik|meningkat|bertambah|turun|hasil)|\b(?:saya|kami|aku)\s+(?:sudah|pernah)\s+(?:uji|tes|menguji|membantu)\b/i;
 const PROMPT_INJECTION = /\b(?:ignore|abaikan|lupakan|system prompt|developer message|instruksi sebelumnya)\b/i;
 const GENERIC_ONLY = /^(?:keren|mantap|setuju|sepakat|bagus|nice|great|thanks|terima kasih|setuju banget|sangat setuju)[.! ]*$/iu;
+const FORMULAIC_OPENING = /^(?:terima kasih (?:sudah|telah) berbagi|menarik sekali|sangat menarik|saya sangat setuju|setuju banget)[!.,\s]/iu;
 const QUESTION_PATTERN = /[^?\n]{2,180}\?/gu;
 const VALUE_TERMS = /\b(?:workflow|alur|proses|langkah|implementasi|contoh|trade[- ]?off|risiko|biaya|cek|ukur|otomasi|automation|website|ai|agent|developer|builder|umkm|usaha|bisnis|landing page|data|uji|tes|prioritas|fondasi|integrasi|api)\b/iu;
 
@@ -27,18 +28,22 @@ export function runReplyQualityGate(input: ReplyQualityInput): ReplyQualityResul
   let score = 100;
   const target = input.targetText.trim();
   if (!text) { reasons.push('empty_reply'); score -= 100; }
-  if (text.length > 500) { reasons.push('over_official_text_limit'); score -= 100; }
+  if (text.length > 280) { reasons.push('over_preferred_reply_length'); score -= 100; }
   if (URL_PATTERN.test(text)) { reasons.push('url_not_allowed'); score -= 100; }
   if (/#\p{L}/u.test(text)) { reasons.push('hashtag_not_allowed_by_default'); score -= 100; }
   if (ENGAGEMENT_BAIT.test(text)) { reasons.push('engagement_bait'); score -= 100; }
   if (HARD_SELLING.test(text)) { reasons.push('promotion_or_solicitation'); score -= 100; }
   if (GENERIC_ONLY.test(text) || meaningfulTokens(text).length < 4) { reasons.push('generic_or_non_substantive'); score -= 100; }
+  if (FORMULAIC_OPENING.test(text)) { reasons.push('formulaic_or_overly_formal_opening'); score -= 100; }
   if (FABRICATED_CLAIM.test(text)) { reasons.push('unsupported_personal_or_outcome_claim'); score -= 100; }
   if (PROMPT_INJECTION.test(text)) { reasons.push('prompt_injection_output'); score -= 100; }
   if ((input.blockedRiskFlags || []).some(flag => flag === 'sensitive_category')) { reasons.push('blocked_sensitive_category'); score -= 100; }
   const questions = text.match(QUESTION_PATTERN) || [];
   if (questions.length > 1) { reasons.push('more_than_one_question'); score -= 100; }
   if (target && similarity(text, target) >= 0.78) { reasons.push('target_repetition_without_added_value'); score -= 100; }
+  const targetTopics = replyTopicTerms(target);
+  const replyTopics = new Set(replyTopicTerms(text));
+  if (targetTopics.length >= 2 && !targetTopics.some(topic => replyTopics.has(topic))) { reasons.push('not_grounded_in_target_topic'); score -= 100; }
   if ((input.recentReplies || []).some(reply => similarity(text, reply) >= 0.72)) { reasons.push('similar_to_recent_outbound_reply'); score -= 100; }
   if (!VALUE_TERMS.test(text) && meaningfulTokens(text).length < 10) { reasons.push('no_useful_implementation_detail'); score -= 25; }
   if (input.targetLanguage === 'id' && englishWordCount(text) > indonesianWordCount(text) + 3) { reasons.push('language_mismatch'); score -= 30; }
@@ -52,6 +57,10 @@ export function replySimilarity(left: string, right: string): number {
 
 function meaningfulTokens(value: string): string[] {
   return [...new Set((value.toLocaleLowerCase('id-ID').match(/[\p{L}\p{N}]{2,}/gu) || []).filter(token => !STOP_WORDS.has(token)))];
+}
+
+function replyTopicTerms(value: string): string[] {
+  return meaningfulTokens(value).filter(token => token.length >= 3 && !REPLY_TOPIC_STOP_WORDS.has(token));
 }
 
 function similarity(left: string, right: string): number {
@@ -71,3 +80,4 @@ function englishWordCount(value: string): number {
 }
 
 const STOP_WORDS = new Set('yang dan untuk dengan dari pada ini itu di ke adalah sebagai bisa agar atau juga dalam karena buat bagi sudah akan tidak lebih jika kamu kami saya kita the and for with from this that are is to of a in on your you'.split(' '));
+const REPLY_TOPIC_STOP_WORDS = new Set('sedang membangun mudah sangat sekali menurut terima kasih sudah telah berbagi menarik penjelasan bagian proses cara hal sesuatu itu ini'.split(' '));

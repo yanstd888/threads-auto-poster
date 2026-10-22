@@ -20,6 +20,7 @@ async function main() {
     const { captureReplySnapshots } = await import('../lib/reply-analytics');
     const { publishReplyCandidate } = await import('../lib/reply-publish');
     const { disconnectThreads, getToken, postReplyToThreads, saveToken } = await import('../lib/threads-api');
+    const { buildReplyPrompt } = await import('../lib/hermes');
 
   initDB();
   const db = getDb();
@@ -98,6 +99,15 @@ async function main() {
   const unsafeReply = runReplyQualityGate({ replyText: 'Cek website saya di https://example.com untuk promo.', targetText: discovered.post.text, targetLanguage: 'id' });
   assert.equal(unsafeReply.passed, false);
   assert.ok(unsafeReply.reasons.includes('url_not_allowed'));
+  const unrelatedReply = runReplyQualityGate({ replyText: 'Jadwal konten pendek biasanya terasa lebih ringan kalau dikerjakan bertahap.', targetText: discovered.post.text, targetLanguage: 'id' });
+  assert.equal(unrelatedReply.passed, false);
+  assert.ok(unrelatedReply.reasons.includes('not_grounded_in_target_topic'));
+  const formalReply = runReplyQualityGate({ replyText: 'Terima kasih sudah berbagi. Alur kerja dan otomasi memang penting.', targetText: discovered.post.text, targetLanguage: 'id' });
+  assert.equal(formalReply.passed, false);
+  assert.ok(formalReply.reasons.includes('formulaic_or_overly_formal_opening'));
+  const replyPrompt = buildReplyPrompt({ targetText: discovered.post.text, targetUsername: 'builder_id', language: 'id', selectionReason: 'keyword match', recentReplies: [], riskFlags: [] });
+  assert.match(replyPrompt, /35–180 UTF-8 characters/);
+  assert.match(replyPrompt, /reuse one specific topic term/);
 
   const limits = getReplyLimitSnapshot(db, { targetUsername: 'builder_id' }, { quotaUsage: 1, quotaTotal: 5, quotaDuration: 86400, remaining: 4 }, now);
   assert.equal(limits.active, true);

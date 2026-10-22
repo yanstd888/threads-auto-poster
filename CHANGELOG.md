@@ -2,6 +2,17 @@
 
 All notable project changes are recorded here.
 
+## 0.3.2 - 2026-10-23
+
+### Fixed
+
+- Align public profile capability probing with the active VPS release.
+- Tighten reply drafts and quality gates for concise, topic-grounded, natural replies.
+
+### Security
+
+- Update Next.js and its ESLint config to 16.4.2 to address the published production dependency advisory.
+
 ## 0.2.0 - 2026-10-19
 
 ### Added
