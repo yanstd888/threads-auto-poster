@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb, initDB, getSetting, setSetting, logAudit } from '@/lib/db';
 import { requireAuth, requireSameOrigin } from '@/lib/auth';
-import { saveToken } from '@/lib/threads-api';
+import { disconnectThreads, saveToken } from '@/lib/threads-api';
 
 type CredentialRow = { id: string; service: string; expires_at: number | null; updated_at: number };
 
@@ -63,5 +63,18 @@ export async function POST(req: NextRequest) {
   saveToken(service, token, expires_at ? Number(expires_at) : undefined);
   logAudit('token_saved', `service=${service}`);
 
+  return NextResponse.json({ ok: true, service });
+}
+
+export async function DELETE(req: NextRequest) {
+  const session = requireAuth(req);
+  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!requireSameOrigin(req)) return NextResponse.json({ error: 'Permintaan tidak valid' }, { status: 403 });
+
+  initDB();
+  const service = new URL(req.url).searchParams.get('service');
+  if (service !== 'threads') return NextResponse.json({ error: 'Hanya koneksi Threads yang dapat diputus dari halaman ini' }, { status: 400 });
+
+  disconnectThreads();
   return NextResponse.json({ ok: true, service });
 }

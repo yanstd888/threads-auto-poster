@@ -8,6 +8,7 @@ import { captureDueSnapshotsForAll, syncRecentThreadMetrics } from './metrics';
 import { pruneExpiredSourceSnapshots } from './source-context';
 import { cancelActiveHermesAgent } from './hermes';
 import { getContentPillar, getContentPillars } from './content-pillars';
+import { runReplyAgentCycle } from './reply-agent';
 
 interface LocalDate {
   year: number;
@@ -19,6 +20,7 @@ interface ScheduleConfig {
   postsPerDay: number;
   hourStart: number;
   hourEnd: number;
+  minimumGapMinutes: number;
   activeDays: number[];
   timezone: string;
 }
@@ -51,7 +53,7 @@ interface SchedulerStatusRow extends ScheduleRow {
 
 const DEFAULT_TIMEZONE = 'UTC';
 const DEFAULT_ACTIVE_DAYS = [0, 1, 2, 3, 4, 5, 6];
-const PLAN_VERSION = 'stable-v4-dynamic-pillar-mix';
+const PLAN_VERSION = 'stable-v5-minimum-gap-mixed-pillar';
 const PLANNING_DAYS = 7;
 const TIMER_HORIZON_MS = 24 * 60 * 60 * 1000;
 const PREPARATION_HORIZON_MS = 48 * 60 * 60 * 1000;
@@ -67,6 +69,8 @@ const MAX_PREPARATION_WORKERS = 3;
 const MISSED_SLOT_CATCHUP_WINDOW_MS = 24 * 60 * 60 * 1000;
 const MISSED_SLOT_CATCHUP_INTERVAL_MS = 10 * 60 * 1000;
 export const MIN_SCHEDULE_GAP_MINUTES = 5;
+export const DEFAULT_MINIMUM_POST_GAP_MINUTES = 20;
+export const MAX_MINIMUM_POST_GAP_MINUTES = 120;
 const DEFAULT_MAX_POSTS_PER_DAY = 288;
 const configuredMaxPosts = Number.parseInt(process.env.MAX_POSTS_PER_DAY || '', 10);
 export const MAX_POSTS_PER_DAY = Number.isInteger(configuredMaxPosts) && configuredMaxPosts > 0
@@ -97,15 +101,18 @@ export function startScheduler() {
   schedulerDb.exec('CREATE TABLE IF NOT EXISTS scheduler_locks (name TEXT PRIMARY KEY, locked_at INTEGER NOT NULL)');
   recoverStalePreparations(schedulerDb);
   cronJobs.push(cron.schedule('0 * * * *', () => recomputeAndSchedule(), { timezone: config.timezone }));
-  cronJobs.push(cron.schedule('*/5 * * * *', () => { void retryFailedPosts(); }, { timezone: config.timezone }));
+  cronJobs.push(cron.schedule('*/5 * * * *', () => { void retryFailedPosts(); void runReplyAgentCycle(); }, { timezone: config.timezone }));
   cronJobs.push(cron.schedule('*/10 * * * *', () => { void syncRecentThreadMetrics(); void captureDueSnapshotsForAll(); }, { timezone: config.timezone }));
   cronJobs.push(cron.schedule('* * * * *', () => {
     if (recoverStalePreparations(getDb()) && getSetting('kill_switch') !== 'true') scheduleNextContentPreparation();
   }, { timezone: config.timezone }));
 
   if (getSetting('schedule_plan_version') !== PLAN_VERSION) {
+    const removed = schedulerDb.prepare("DELETE FROM schedule WHERE status = 'pending' AND slot_time > ? AND NOT EXISTS (SELECT 1 FROM posts WHERE posts.schedule_id = schedule.id AND posts.status <> 'quality_failed')").run(Date.now());
+    ensureFutureSlots(config);
     rebalanceFutureSchedule(config);
     setSetting('schedule_plan_version', PLAN_VERSION);
+    logAudit('schedule_plan_refreshed', `version=${PLAN_VERSION} pending_slots_removed=${removed.changes}`);
   }
 
   void recoverInterruptedSlots().finally(() => {
@@ -113,6 +120,7 @@ export function startScheduler() {
     scheduleMissedSlotCatchup();
   });
   void retryFailedPosts();
+  void runReplyAgentCycle();
   void syncRecentThreadMetrics();
   logAudit('scheduler_started', `timezone=${config.timezone}`);
 }
@@ -130,7 +138,13 @@ export function refreshSchedule() {
   clearSlotTimers();
   clearContentPreparationTimer();
   const removed = getDb().prepare("DELETE FROM schedule WHERE status = 'pending' AND slot_time > ? AND NOT EXISTS (SELECT 1 FROM posts WHERE posts.schedule_id = schedule.id AND posts.status <> 'quality_failed')").run(Date.now());
-  recomputeAndSchedule();
+  // Refreshing settings must rebuild future slots even while safe mode is active; only arming/publishing stays disabled.
+  ensureFutureSlots(getScheduleConfig());
+  if (getSetting('kill_switch') !== 'true') {
+    armPendingSlots();
+    if (getSetting('content_agent_enabled') !== 'false') scheduleNextContentPreparation();
+  }
+  scheduleMissedSlotCatchup();
   logAudit('schedule_refreshed', `pending_slots_removed=${removed.changes}`);
 }
 
@@ -190,50 +204,94 @@ function ensureFutureSlots(config: ScheduleConfig) {
   const insert = db.prepare(
     'INSERT OR IGNORE INTO schedule (slot_time, pillar, post_type, status) VALUES (?, ?, ?, ?)',
   );
-
+  const dailyPlans: Array<{ date: LocalDate; slotTimes: number[] }> = [];
   for (let offset = 0; offset < PLANNING_DAYS; offset++) {
     const date = addDays(today, offset);
     const dayOfWeek = new Date(Date.UTC(date.year, date.month - 1, date.day)).getUTCDay();
     if (!config.activeDays.includes(dayOfWeek)) continue;
 
-    const slotTimes = planDailySlotTimes(date, config.postsPerDay, config.hourStart, config.hourEnd, config.timezone);
-    const pillars = planDailyPillars(slotTimes.length);
-    for (let slotIndex = 0; slotIndex < slotTimes.length; slotIndex++) {
+    const slotTimes = planDailySlotTimes(date, config.postsPerDay, config.hourStart, config.hourEnd, config.timezone, config.minimumGapMinutes);
+    if (slotTimes.length) dailyPlans.push({ date, slotTimes });
+  }
+  const pillars = planPillarSequence(
+    dailyPlans.reduce((count, day) => count + day.slotTimes.length, 0),
+    `${today.year}-${today.month}-${today.day}:${config.minimumGapMinutes}`,
+  );
+  const postTypes = planPromotionTypes(pillars);
+  let pillarIndex = 0;
+  for (const { slotTimes } of dailyPlans) {
+    for (let slotIndex = 0; slotIndex < slotTimes.length; slotIndex++, pillarIndex++) {
       const slotTime = slotTimes[slotIndex];
       if (slotTime <= now + 60 * 1000) continue;
-      const { pillar, postType } = selectPillarAndType(`${date.year}-${date.month}-${date.day}:${slotTime}`, pillars[slotIndex]);
-      insert.run(slotTime, pillar, postType, 'pending');
+      insert.run(slotTime, pillars[pillarIndex], postTypes[pillarIndex], 'pending');
     }
   }
 }
 
-export function planDailyPillars(count: number): string[] {
+export function planDailyPillars(count: number, seed = 'daily'): string[] {
+  return planPillarSequence(count, seed);
+}
+
+export function planPillarSequence(count: number, seed: string, configuredPillars = getContentPillars(getDb(), true)): string[] {
   const safeCount = Math.max(0, Math.floor(count));
-  const pillars = getContentPillars(getDb(), true);
+  const pillars = configuredPillars;
   if (pillars.length === 0) return [];
   const totalWeight = pillars.reduce((sum, pillar) => sum + Math.max(0, pillar.weight), 0);
   if (totalWeight === 0) return Array.from({ length: safeCount }, (_, index) => pillars[index % pillars.length].slug);
 
   const counts = new Map(pillars.map(pillar => [pillar.slug, 0]));
-  return Array.from({ length: safeCount }, (_, index) => {
-    const selected = pillars.reduce((best, pillar) => {
+  const selected: string[] = [];
+  for (let index = 0; index < safeCount; index++) {
+    const candidates = pillars.filter(pillar => pillars.length < 2 || !(selected.at(-1) === pillar.slug && selected.at(-2) === pillar.slug));
+    const pool = candidates.length ? candidates : pillars;
+    const next = pool.reduce((best, pillar) => {
       const desired = ((index + 1) * Math.max(0, pillar.weight)) / totalWeight;
       const deficit = desired - (counts.get(pillar.slug) || 0);
       const bestDeficit = desired - (counts.get(best.slug) || 0);
-      return deficit > bestDeficit ? pillar : best;
-    }, pillars[0]);
-    counts.set(selected.slug, (counts.get(selected.slug) || 0) + 1);
-    return selected.slug;
-  });
+      if (deficit !== bestDeficit) return deficit > bestDeficit ? pillar : best;
+      return stableUnit(`${seed}:${index}:${pillar.slug}`) < stableUnit(`${seed}:${index}:${best.slug}`) ? pillar : best;
+    }, pool[0]);
+    counts.set(next.slug, (counts.get(next.slug) || 0) + 1);
+    selected.push(next.slug);
+  }
+  return selected;
 }
 
-export function getDailySlotCapacity(hourStart: number, hourEnd: number): number {
+export function planPromotionTypes(
+  pillars: string[],
+  configuredPillars = getContentPillars(getDb(), true),
+  promoRatio = Number(getSetting('promo_ratio') || '0.2'),
+): Array<'education' | 'promotion'> {
+  const types: Array<'education' | 'promotion'> = pillars.map(() => 'education');
+  const ratio = Math.min(0.2, Math.max(0, promoRatio));
+  const eligible = pillars.map((pillar, index) => ({ pillar, index }))
+    .filter(({ pillar }) => configuredPillars.find(item => item.slug === pillar)?.promo_eligible ?? false);
+  const target = Math.round(eligible.length * ratio);
+  if (target === 0) return types;
+
+  const selected: number[] = [];
+  for (let ordinal = 1; ordinal <= target; ordinal++) {
+    const ideal = Math.round((ordinal * (eligible.length + 1)) / (target + 1)) - 1;
+    const candidate = eligible.slice().sort((a, b) => {
+      const distance = Math.abs(a.index - eligible[Math.max(0, ideal)]?.index);
+      const otherDistance = Math.abs(b.index - eligible[Math.max(0, ideal)]?.index);
+      return distance - otherDistance || stableUnit(`${a.pillar}:${a.index}`) - stableUnit(`${b.pillar}:${b.index}`);
+    }).find(({ index }) => !selected.some(chosen => Math.abs(chosen - index) === 1));
+    if (!candidate) break;
+    selected.push(candidate.index);
+    types[candidate.index] = 'promotion';
+  }
+  return types;
+}
+
+export function getDailySlotCapacity(hourStart: number, hourEnd: number, minimumGapMinutes = DEFAULT_MINIMUM_POST_GAP_MINUTES): number {
   const start = clampInt(hourStart, 8, 0, 22);
   const end = clampInt(hourEnd, 20, 1, 23);
   if (end <= start) return 0;
   const firstMinute = start * 60 + 10;
   const lastMinute = end * 60 - 10;
-  return Math.floor((lastMinute - firstMinute) / MIN_SCHEDULE_GAP_MINUTES) + 1;
+  const gap = clampInt(minimumGapMinutes, DEFAULT_MINIMUM_POST_GAP_MINUTES, MIN_SCHEDULE_GAP_MINUTES, MAX_MINIMUM_POST_GAP_MINUTES);
+  return Math.floor((lastMinute - firstMinute) / gap) + 1;
 }
 
 export function planDailySlotTimes(
@@ -242,6 +300,7 @@ export function planDailySlotTimes(
   hourStart: number,
   hourEnd: number,
   timezone: string,
+  minimumGapMinutes = DEFAULT_MINIMUM_POST_GAP_MINUTES,
 ): number[] {
   const start = clampInt(hourStart, 8, 0, 22);
   const end = clampInt(hourEnd, 20, 1, 23);
@@ -249,13 +308,15 @@ export function planDailySlotTimes(
 
   const firstMinute = start * 60 + 10;
   const lastMinute = end * 60 - 10;
-  const maxSlots = getDailySlotCapacity(start, end);
-  const count = Math.min(clampInt(postsPerDay, 3, 1, MAX_POSTS_PER_DAY), Math.max(0, maxSlots));
+  const gap = clampInt(minimumGapMinutes, DEFAULT_MINIMUM_POST_GAP_MINUTES, MIN_SCHEDULE_GAP_MINUTES, MAX_MINIMUM_POST_GAP_MINUTES);
+  const maxSlots = getDailySlotCapacity(start, end, gap);
+  const count = clampInt(postsPerDay, 3, 1, MAX_POSTS_PER_DAY);
+  if (count > maxSlots) return [];
   if (count === 0) return [];
 
   const span = lastMinute - firstMinute;
   const nominalGap = span / count;
-  const minGap = count === 1 ? 0 : Math.max(MIN_SCHEDULE_GAP_MINUTES, Math.floor(nominalGap) - 10);
+  const minGap = count === 1 ? 0 : Math.max(gap, Math.floor(nominalGap) - 10);
   const dayOfWeek = new Date(Date.UTC(date.year, date.month - 1, date.day)).getUTCDay();
   const peak = DAY_PEAK_MINUTES[dayOfWeek];
   const rawAnchorIndex = Math.round((peak - (firstMinute + nominalGap / 2)) / nominalGap);
@@ -293,6 +354,11 @@ async function retryFailedPosts() {
   `).all(MAX_AUTO_UPLOAD_RETRIES) as { id: number; schedule_id: number | null }[];
 
   for (const post of posts) {
+    const waitMs = rootPostGapRemainingMs(db, getScheduleConfig().minimumGapMinutes);
+    if (waitMs > 0) {
+      logAudit('post_auto_retry_deferred', `post ${post.id}: root gap ${Math.ceil(waitMs / 60_000)}m`);
+      break;
+    }
     const result = await publishStoredPost(post.id, ['failed']);
     if (result.kind === 'posted' || result.kind === 'already_posted') {
       if (post.schedule_id) db.prepare("UPDATE schedule SET status = 'completed', last_error = NULL WHERE id = ?").run(post.schedule_id);
@@ -432,13 +498,8 @@ export function getNextPreparationSlot(db: DatabaseSync, now: number, pillar?: s
       AND NOT EXISTS (
         SELECT 1 FROM posts p WHERE p.schedule_id = s.id AND p.status <> 'quality_failed'
       )
-    -- An overdue retry must not wait behind another future retry in the same pillar.
-    ORDER BY
-      CASE WHEN s.status = 'retrying' AND COALESCE(s.retry_at, 0) <= ? THEN 0 ELSE 1 END,
-      CASE WHEN s.status = 'retrying' AND COALESCE(s.retry_at, 0) <= ? THEN COALESCE(s.retry_at, s.slot_time) ELSE s.slot_time END ASC,
-      s.slot_time ASC
-    LIMIT 1
-  `).get(now - PREPARATION_LOOKBACK_MS, now + PREPARATION_HORIZON_MS, ...(pillar ? [pillar] : []), now) as ScheduleRow | undefined;
+    ORDER BY s.slot_time ASC LIMIT 1
+  `).get(now - PREPARATION_LOOKBACK_MS, now + PREPARATION_HORIZON_MS, ...(pillar ? [pillar] : [])) as ScheduleRow | undefined;
   return slot || null;
 }
 
@@ -470,17 +531,18 @@ export function shouldRetryPreparationUntilSlot(kind: PreparationErrorKind): boo
   return kind === 'source_transient' || kind === 'agent_timeout' || kind === 'agent_crash' || kind === 'invalid_json' || kind === 'quality_reject';
 }
 
-function markPreparationRetry(slot: ScheduleRow, error: string) {
+function markPreparationRetry(slot: ScheduleRow, error: string, qualityFailure = false) {
   const kind = classifyPreparationError(error);
   const labeledError = `${kind}: ${error}`;
   const db = getDb();
   const nextAttempt = (Number(slot.retry_count) || 0) + 1;
   const retryUntilSlot = shouldRetryPreparationUntilSlot(kind);
-  const terminalStatus = kind === 'quality_reject' ? 'blocked_quality' : retryUntilSlot ? 'blocked_agent' : 'failed';
+  const maxAttempts = MAX_CONTENT_PREPARATION_ATTEMPTS;
+  const terminalStatus = qualityFailure ? 'blocked_quality' : retryUntilSlot ? 'blocked_agent' : 'failed';
   const retryAt = Date.now() + contentPreparationRetryDelayMs(Number(slot.retry_count) || 0);
-  if (retryAt < slot.slot_time && retryUntilSlot) {
+  if (retryAt < slot.slot_time && (retryUntilSlot || nextAttempt < maxAttempts)) {
     db.prepare("UPDATE schedule SET status = 'retrying', retry_at = ?, retry_count = ?, last_error = ? WHERE id = ?").run(retryAt, nextAttempt, labeledError, slot.id);
-    logAudit('schedule_prepare_retry', `slot ${slot.id}: retry ${nextAttempt} until slot in ${Math.round((retryAt - Date.now()) / 1000)}s: ${labeledError}`);
+    logAudit('schedule_prepare_retry', `slot ${slot.id}: retry ${nextAttempt}${retryUntilSlot ? ' until slot' : `/${maxAttempts}`} in ${Math.round((retryAt - Date.now()) / 1000)}s: ${labeledError}`);
     return;
   }
   db.prepare("UPDATE schedule SET status = ?, retry_at = NULL, retry_count = ?, last_error = ? WHERE id = ?").run(terminalStatus, nextAttempt, labeledError, slot.id);
@@ -524,7 +586,7 @@ async function prepareOnePendingSlot(pillar: string) {
           logAudit('schedule_prepare_failed', `slot ${slot.id}: blocked_source: ${preparationError}`);
         } else markPreparationRetry(slot, preparationError);
       } else if (!result.qualityPassed) {
-        markPreparationRetry(slot, 'quality_gate');
+        markPreparationRetry(slot, 'quality_gate', true);
       } else {
         db.prepare("UPDATE schedule SET status = 'pending', retry_at = NULL, last_error = NULL WHERE id = ?").run(slot.id);
         logAudit('schedule_prepared', `slot ${slot.id}: post=${result.postId} status=${result.status}`);
@@ -649,6 +711,14 @@ async function executeSlot(slot: ScheduleRow, allowLateCatchup = false) {
       return;
     }
     if (getSetting('posting_mode') === 'auto') {
+      const waitMs = rootPostGapRemainingMs(db, getScheduleConfig().minimumGapMinutes);
+      if (waitMs > 0) {
+        db.prepare("UPDATE schedule SET status = 'pending', last_error = ? WHERE id = ? AND status = 'processing'")
+          .run(`Menunggu jarak minimum root post (${Math.ceil(waitMs / 60_000)}m)`, slot.id);
+        logAudit('slot_deferred_for_root_gap', `slot ${slot.id}: ${Math.ceil(waitMs / 60_000)}m`);
+        scheduleMissedSlotCatchup();
+        return;
+      }
       const result = await publishStoredPost(post.id, ['scheduled']);
       if (result.kind === 'posted' || result.kind === 'already_posted') {
         db.prepare("UPDATE schedule SET status = 'completed', last_error = NULL WHERE id = ?").run(slot.id);
@@ -739,9 +809,15 @@ function getScheduleConfig(): ScheduleConfig {
     postsPerDay: clampInt(getSetting('posts_per_day'), 3, 1, MAX_POSTS_PER_DAY),
     hourStart,
     hourEnd: hourEnd > hourStart ? hourEnd : 20,
+    minimumGapMinutes: clampInt(getSetting('minimum_post_gap_minutes'), DEFAULT_MINIMUM_POST_GAP_MINUTES, MIN_SCHEDULE_GAP_MINUTES, MAX_MINIMUM_POST_GAP_MINUTES),
     activeDays: parseActiveDays(getSetting('active_days')),
     timezone: isValidScheduleTimeZone(getSetting('timezone') || '') ? getSetting('timezone')! : DEFAULT_TIMEZONE,
   };
+}
+
+function rootPostGapRemainingMs(db: DatabaseSync, minimumGapMinutes: number, now = Date.now()): number {
+  const row = db.prepare("SELECT MAX(posted_at) AS posted_at FROM posts WHERE threads_id IS NOT NULL AND posted_at IS NOT NULL").get() as { posted_at: number | null };
+  return Math.max(0, Number(row.posted_at || 0) + minimumGapMinutes * 60_000 - now);
 }
 
 function parseActiveDays(value: string | null): number[] {

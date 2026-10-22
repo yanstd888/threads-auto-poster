@@ -8,6 +8,7 @@ type Messages = {
   appName: string;
   dashboard: string;
   content: string;
+  replies: string;
   schedule: string;
   sources: string;
   settings: string;
@@ -26,10 +27,10 @@ type Messages = {
 
 const messages: Record<AppLocale, Messages> = {
   id: {
-    appName: 'Threads Auto Poster', dashboard: 'Dashboard', content: 'Konten', schedule: 'Jadwal', sources: 'Sumber', settings: 'Pengaturan', language: 'Bahasa', github: 'GitHub', website: 'Website', killSwitch: 'Kill switch', killSwitchOn: 'Matikan auto-post', killSwitchOff: 'Nyalakan auto-post', logout: 'Keluar', login: 'Masuk', password: 'Password', signIn: 'Masuk', invalidLogin: 'Password salah',
+    appName: 'Threads Auto Poster', dashboard: 'Dashboard', content: 'Konten', replies: 'Reply Agent', schedule: 'Jadwal', sources: 'Sumber', settings: 'Pengaturan', language: 'Bahasa', github: 'GitHub', website: 'Website', killSwitch: 'Kill switch', killSwitchOn: 'Matikan auto-post', killSwitchOff: 'Nyalakan auto-post', logout: 'Keluar', login: 'Masuk', password: 'Password', signIn: 'Masuk', invalidLogin: 'Password salah',
   },
   en: {
-    appName: 'Threads Auto Poster', dashboard: 'Dashboard', content: 'Content', schedule: 'Schedule', sources: 'Sources', settings: 'Settings', language: 'Language', github: 'GitHub', website: 'Website', killSwitch: 'Kill switch', killSwitchOn: 'Disable auto-post', killSwitchOff: 'Enable auto-post', logout: 'Log out', login: 'Log in', password: 'Password', signIn: 'Sign in', invalidLogin: 'Invalid password',
+    appName: 'Threads Auto Poster', dashboard: 'Dashboard', content: 'Content', replies: 'Reply Agent', schedule: 'Schedule', sources: 'Sources', settings: 'Settings', language: 'Language', github: 'GitHub', website: 'Website', killSwitch: 'Kill switch', killSwitchOn: 'Disable auto-post', killSwitchOff: 'Enable auto-post', logout: 'Log out', login: 'Log in', password: 'Password', signIn: 'Sign in', invalidLogin: 'Invalid password',
   },
 };
 

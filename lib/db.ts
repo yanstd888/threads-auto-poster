@@ -150,6 +150,90 @@ export function initDB() {
       id INTEGER PRIMARY KEY CHECK (id = 1),
       password_hash TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS reply_targets (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      target_type TEXT NOT NULL CHECK (target_type IN ('account', 'keyword', 'topic', 'community_bundle', 'free')),
+      label TEXT NOT NULL,
+      value TEXT,
+      config_json TEXT NOT NULL DEFAULT '{}',
+      enabled INTEGER NOT NULL DEFAULT 1,
+      weight INTEGER NOT NULL DEFAULT 1,
+      last_scanned_at INTEGER,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS reply_candidates (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      target_id INTEGER,
+      target_thread_id TEXT NOT NULL UNIQUE,
+      root_thread_id TEXT,
+      parent_reply_thread_id TEXT,
+      target_username TEXT NOT NULL,
+      target_permalink TEXT,
+      target_text TEXT NOT NULL,
+      target_topic_tag TEXT,
+      target_posted_at INTEGER,
+      target_type TEXT NOT NULL,
+      target_query TEXT,
+      discovered_at INTEGER NOT NULL,
+      relevance_score INTEGER,
+      selection_reason TEXT,
+      risk_flags TEXT NOT NULL DEFAULT '[]',
+      generated_reply TEXT,
+      edited_reply TEXT,
+      reply_language TEXT,
+      reply_mechanism TEXT,
+      reply_reason TEXT,
+      quality_score INTEGER,
+      quality_status TEXT,
+      quality_reasons TEXT NOT NULL DEFAULT '[]',
+      status TEXT NOT NULL DEFAULT 'discovered',
+      reviewed_at INTEGER,
+      scheduled_at INTEGER,
+      publishing_started_at INTEGER,
+      reply_thread_id TEXT,
+      reply_permalink TEXT,
+      published_at INTEGER,
+      last_error TEXT,
+      retry_count INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      FOREIGN KEY (target_id) REFERENCES reply_targets(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS reply_metrics (
+      candidate_id INTEGER PRIMARY KEY,
+      views INTEGER,
+      likes INTEGER,
+      replies INTEGER,
+      reposts INTEGER,
+      quotes INTEGER,
+      shares INTEGER,
+      updated_at INTEGER NOT NULL,
+      FOREIGN KEY (candidate_id) REFERENCES reply_candidates(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS reply_metric_snapshots (
+      candidate_id INTEGER NOT NULL,
+      checkpoint TEXT NOT NULL CHECK (checkpoint IN ('1h', '24h', '7d')),
+      views INTEGER,
+      likes INTEGER,
+      replies INTEGER,
+      reposts INTEGER,
+      quotes INTEGER,
+      shares INTEGER,
+      captured_at INTEGER NOT NULL,
+      PRIMARY KEY (candidate_id, checkpoint),
+      FOREIGN KEY (candidate_id) REFERENCES reply_candidates(id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_reply_candidates_status_time ON reply_candidates(status, scheduled_at, discovered_at);
+    CREATE INDEX IF NOT EXISTS idx_reply_candidates_target_account ON reply_candidates(target_username, published_at);
+    CREATE INDEX IF NOT EXISTS idx_reply_candidates_published_at ON reply_candidates(published_at);
+    CREATE INDEX IF NOT EXISTS idx_reply_candidates_target_discovered ON reply_candidates(target_id, discovered_at);
+    CREATE INDEX IF NOT EXISTS idx_reply_targets_enabled_weight ON reply_targets(enabled, weight);
   `);
 
   const legacyUsers = d.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'users'").get() as { name: string } | undefined;
@@ -172,6 +256,8 @@ export function initDB() {
     'ALTER TABLE metric_snapshots ADD COLUMN shares INTEGER NOT NULL DEFAULT 0',
     'ALTER TABLE post_attributes ADD COLUMN topic_tag TEXT',
     'ALTER TABLE post_attributes ADD COLUMN composition_slug TEXT',
+    'ALTER TABLE reply_candidates ADD COLUMN root_thread_id TEXT',
+    'ALTER TABLE reply_candidates ADD COLUMN parent_reply_thread_id TEXT',
   ]) {
     try { d.exec(migration); } catch {}
   }
@@ -267,7 +353,7 @@ export function initDB() {
     ['active_hours_end', '20'],
     ['active_days', JSON.stringify([1,2,3,4,5,6,0])],
     ['timezone', 'UTC'],
-    ['pillar_weights', JSON.stringify({github:25, ai:25, umkm:30, security:20})],
+    ['pillar_weights', JSON.stringify({ umkm: 25, ai: 20, github: 20, security: 15, 'ai-news-update': 10, 'programmer-quotes': 10 })],
     ['promo_ratio', '0.2'],
     ['promo_offer', 'konsultasi kebutuhan website'],
     ['promo_reason', 'agar pembaca tahu langkah perbaikan website yang paling prioritas'],
@@ -281,6 +367,23 @@ export function initDB() {
     ['hermes_model', 'default'],
     ['hermes_profile', 'default'],
     ['source_snapshot_ttl_ms', '900000'],
+    ['minimum_post_gap_minutes', '20'],
+    ['reply_agent_enabled', 'false'],
+    ['reply_posting_mode', 'approval'],
+    ['reply_daily_max', '10'],
+    ['reply_unique_accounts_daily_max', '10'],
+    ['reply_per_account_daily_max', '1'],
+    ['reply_account_policy', 'once'],
+    ['reply_min_gap_minutes', '15'],
+    ['reply_active_hours_start', '8'],
+    ['reply_active_hours_end', '20'],
+    ['reply_active_days', JSON.stringify([1,2,3,4,5,6,0])],
+    ['reply_discovery_interval_minutes', '15'],
+    ['reply_max_post_age_hours', '48'],
+    ['reply_relevance_threshold', '80'],
+    ['reply_language_mode', 'match_target'],
+    ['reply_auto_score_threshold', '90'],
+    ['reply_auto_mode_approved', 'false'],
   ];
 
   const insertStmt = d.prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)');

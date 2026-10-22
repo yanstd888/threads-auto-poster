@@ -6,9 +6,9 @@ import { getContentComposition } from './content-compositions';
 import { contentHistoryRepository, releasePrimarySourceReservation, reservePrimarySource } from './content-history';
 import { invokeHermesAgent } from './hermes';
 import { ensureNaturalQuestionCta, formatPostText, normalizePillarHashtags, runQualityGate, splitOverlongThreadParts } from './quality-gate';
-import { fetchCurrentSourceContext, getApprovedSources } from './source-context';
+import { fetchCurrentSourceContext, getApprovedSources, type ApprovedSource } from './source-context';
 import { THREADS_LIMITS } from './threads-api';
-import { OFFICIAL_WEBSITE_URL } from './brand-links';
+import { OFFICIAL_STORE_URL } from './brand-links';
 
 type ContentSlot = { id?: number; pillar: string; post_type: 'education' | 'promotion'; slot_time: number; retry_count?: number };
 
@@ -27,14 +27,29 @@ async function createStoredPost(slot: ContentSlot, reservationId: number, passed
   const pillarConfig = getContentPillar(slot.pillar);
   const requiresResource = pillarConfig?.source_policy === 'github_repository';
   const candidateSources = allSources.filter(source => !requiresResource || isGitHubRepository(source.url));
-  const primaryUrl = reservePrimarySource(db, reservationId, candidateSources.map(source => source.url));
-  const primarySource = candidateSources.find(source => source.url === primaryUrl);
-  if (!primarySource) return { error: 'Semua tema/sumber utama untuk pilar ini sudah dipakai dalam 14 hari terakhir' };
+  const recentLinks = requiresResource ? new Set(contentHistoryRepository.getRecentLinksSync(14)) : null;
+  const availableResourceSources = requiresResource ? candidateSources.filter(source => !recentLinks!.has(source.url)) : candidateSources;
+  if (availableResourceSources.length === 0) return { error: 'Semua tema/sumber utama untuk pilar ini sudah dipakai dalam 14 hari terakhir' };
+  let primarySource: ApprovedSource | undefined;
+  if (!requiresResource) {
+    const primaryUrl = reservePrimarySource(db, reservationId, candidateSources.map(source => source.url));
+    primarySource = candidateSources.find(source => source.url === primaryUrl);
+    if (!primarySource) return { error: 'Semua tema/sumber utama untuk pilar ini sudah dipakai dalam 14 hari terakhir' };
+  }
   try {
-    const sourceContext = await fetchCurrentSourceContext([primarySource, ...allSources.filter(source => source.id !== primarySource.id)]);
+    const sourceContext = await fetchCurrentSourceContext(
+      requiresResource ? availableResourceSources : [primarySource!, ...allSources.filter(source => source.id !== primarySource!.id)],
+      requiresResource,
+    );
     if ('error' in sourceContext) return { error: sourceContext.error };
-    const requiredResourceUrl = requiresResource ? sourceContext.resourceUrls[0] : undefined;
-    if (requiresResource && !requiredResourceUrl) return { error: 'source_transient: Required repository resource unavailable' };
+    if (requiresResource) {
+      const primaryUrl = reservePrimarySource(db, reservationId, sourceContext.resourceUrls);
+      primarySource = availableResourceSources.find(source => source.url === primaryUrl);
+      if (!primarySource) return { error: 'source_transient: Required repository resource unavailable' };
+    }
+    const primarySourceUrl = primarySource?.url;
+    if (!primarySourceUrl) return { error: 'source_transient: Required repository resource unavailable' };
+    const requiredResourceUrl = requiresResource ? primarySourceUrl : undefined;
 
     const retryAttempt = Math.max(0, Number(slot.retry_count) || 0);
     const contentLocale: 'id' | 'en' = getSetting('content_locale') === 'en' || pillarConfig?.locale === 'en' ? 'en' : 'id';
@@ -50,7 +65,7 @@ async function createStoredPost(slot: ContentSlot, reservationId: number, passed
     const performanceHint = getPerformanceHint(db);
     const promoOffer = slot.post_type === 'promotion' ? (getSetting('promo_offer') || 'konsultasi kebutuhan website') : undefined;
     const promoReason = slot.post_type === 'promotion' ? (getSetting('promo_reason') || 'agar pembaca tahu langkah perbaikan website yang paling prioritas') : undefined;
-    const promoWebsiteUrl = slot.post_type === 'promotion' ? OFFICIAL_WEBSITE_URL : undefined;
+    const promoWebsiteUrl = slot.post_type === 'promotion' ? OFFICIAL_STORE_URL : undefined;
     const generated = await invokeHermesAgent({
     pillar: strategy.label,
     postType: slot.post_type,
@@ -151,13 +166,13 @@ async function createStoredPost(slot: ContentSlot, reservationId: number, passed
         topicHash: generated.text.slice(0, 100),
         pillar: slot.pillar,
         topic: generated.text.slice(0, 200),
-        link: primarySource.url,
+        link: primarySourceUrl,
         createdAt: now,
       });
     }
     return { postId, status, qualityPassed: quality.passed };
   } finally {
-    releasePrimarySourceReservation(db, reservationId, primarySource.url);
+    if (primarySource) releasePrimarySourceReservation(db, reservationId, primarySource.url);
   }
 }
 

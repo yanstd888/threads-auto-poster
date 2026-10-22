@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState, Suspense } from 'react';
-import { Save, Eye, EyeOff, Link2, CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
+import { Save, Eye, EyeOff, Link2, Unlink, CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
 import { useSearchParams } from 'next/navigation';
 import { useI18n } from '@/lib/i18n';
 import { translateUi } from '@/lib/ui-translations';
@@ -75,6 +75,23 @@ function CredentialsInner() {
     }
   }, []);
 
+  const handleDisconnect = async () => {
+    if (!window.confirm(locale === 'en' ? 'Disconnect this Threads account from this app?' : 'Putuskan akun Threads ini dari aplikasi?')) return;
+    setSaving(true);
+    try {
+      const res = await fetch('/api/credentials?service=threads', { method: 'DELETE' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Disconnect failed');
+      setThreadsUsername('');
+      await Promise.all([fetchCredentials(), fetchStatus()]);
+      setBanner({ type: 'success', message: locale === 'en' ? 'Threads disconnected on this app.' : 'Koneksi Threads di aplikasi ini sudah diputus.' });
+    } catch (error) {
+      setBanner({ type: 'error', message: error instanceof Error ? error.message : 'Gagal memutuskan koneksi Threads.' });
+    } finally {
+      setSaving(false);
+    }
+  };
+
   useEffect(() => {
     const initial = setTimeout(() => {
       void fetchCredentials();
@@ -133,12 +150,15 @@ function CredentialsInner() {
                 <p className="text-xs text-amber-700">{locale === 'en' ? 'Reconnect once to grant Insights permission for Analytics.' : 'Untuk Analitik, hubungkan ulang sekali agar izin insights ikut diberikan.'}</p>
               </div>
             </div>
-            <a
-              href="/api/auth/threads/connect"
-              className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 text-sm"
-            >
-              {ui('Reconnect')}
-            </a>
+            <div className="flex flex-wrap justify-end gap-2">
+              <button type="button" onClick={handleDisconnect} disabled={saving} className="flex items-center gap-2 px-4 py-2 border border-red-300 text-red-700 rounded-lg hover:bg-red-50 text-sm disabled:opacity-50">
+                <Unlink className="w-4 h-4" />
+                {locale === 'en' ? 'Disconnect' : 'Putuskan koneksi'}
+              </button>
+              <a href="/api/auth/threads/connect?reply=1" className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 text-sm">
+                {ui('Reconnect')}
+              </a>
+            </div>
           </div>
         ) : (
           <div className="flex items-center justify-between">
@@ -154,7 +174,7 @@ function CredentialsInner() {
               </div>
             </div>
             <a
-              href="/api/auth/threads/connect"
+              href="/api/auth/threads/connect?reply=1"
               className="flex items-center gap-2 px-4 py-2 bg-black text-white rounded-lg hover:bg-gray-800 text-sm"
             >
               <Link2 className="w-4 h-4" />

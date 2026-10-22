@@ -55,6 +55,24 @@ const STRATEGIES: Record<string, Strategy> = {
       ['cara mengamankan akun', 'tanda phishing', 'keamanan data bisnis'],
     ],
   },
+  'ai-news-update': {
+    label: 'NewsAI / Berita AI terbaru',
+    topicTag: 'AI News',
+    clusters: [
+      ['berita AI terbaru', 'perkembangan kecerdasan buatan', 'update AI hari ini'],
+      ['rilis model AI', 'riset AI terbaru', 'dampak AI untuk developer'],
+      ['AI agents terbaru', 'kebijakan AI', 'tren AI global'],
+    ],
+  },
+  'programmer-quotes': {
+    label: 'Quotes of the day — Programmer/VibeCoder',
+    topicTag: 'Programmer Mindset',
+    clusters: [
+      ['quote programmer', 'kutipan coding', 'mindset developer'],
+      ['quote software engineering', 'clean code', 'belajar programming'],
+      ['VibeCoder', 'developer mindset', 'kualitas kode'],
+    ],
+  },
 };
 
 const FALLBACK: Strategy = STRATEGIES.github;

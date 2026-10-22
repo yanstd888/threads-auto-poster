@@ -19,7 +19,7 @@ export async function GET(req: NextRequest) {
   }
 
   const state = crypto.randomBytes(32).toString('base64url');
-  const url = buildAuthorizeUrl(state);
+  const url = buildAuthorizeUrl(state, { includeReplyDiscovery: req.nextUrl.searchParams.get('reply') === '1' });
   const response = NextResponse.redirect(url!, { status: 302 });
   response.cookies.set(OAUTH_STATE_COOKIE, state, {
     httpOnly: true,
