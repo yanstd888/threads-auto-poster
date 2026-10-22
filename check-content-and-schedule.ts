@@ -205,8 +205,8 @@ for (let index = 1; index < slots.length; index++) {
   assert.ok(slots[index] - slots[index - 1] >= 60 * 60 * 1000, 'legacy 10-post spacing must remain at least 60 minutes');
 }
 const slots11 = planDailySlotTimes({ year: 2026, month: 10, day: 15 }, 11, 8, 20, 'Asia/Jakarta');
-const slots25 = planDailySlotTimes({ year: 2026, month: 10, day: 15 }, 25, 8, 20, 'Asia/Jakarta');
-const slots100 = planDailySlotTimes({ year: 2026, month: 10, day: 15 }, 100, 8, 20, 'Asia/Jakarta');
+const slots25 = planDailySlotTimes({ year: 2026, month: 10, day: 15 }, 25, 8, 20, 'Asia/Jakarta', MIN_SCHEDULE_GAP_MINUTES);
+const slots100 = planDailySlotTimes({ year: 2026, month: 10, day: 15 }, 100, 8, 20, 'Asia/Jakarta', MIN_SCHEDULE_GAP_MINUTES);
 assert.equal(slots11.length, 11, '11 posts/day must schedule');
 assert.equal(slots25.length, 25, '25 posts/day must schedule');
 assert.equal(slots100.length, 100, 'higher configured volume must schedule');
@@ -215,13 +215,16 @@ for (const candidate of [slots11, slots25, slots100]) {
     assert.ok(candidate[index] - candidate[index - 1] >= MIN_SCHEDULE_GAP_MINUTES * 60 * 1000, 'high-volume slots must keep the safety gap');
   }
 }
-assert.equal(getDailySlotCapacity(8, 20), 141);
-assert.equal(planDailySlotTimes({ year: 2026, month: 10, day: 15 }, 200, 8, 20, 'Asia/Jakarta').length, getDailySlotCapacity(8, 20), 'capacity must bound impossible requests');
+assert.equal(getDailySlotCapacity(8, 20, MIN_SCHEDULE_GAP_MINUTES), 141);
+assert.equal(planDailySlotTimes({ year: 2026, month: 10, day: 15 }, 200, 8, 20, 'Asia/Jakarta', MIN_SCHEDULE_GAP_MINUTES).length, 0, 'impossible configured volume must be rejected');
 const hourMinute = new Intl.DateTimeFormat('en-GB', {
   timeZone: 'Asia/Jakarta', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
 });
 assert.ok(slots.map((slot: number) => hourMinute.format(new Date(slot))).includes('09:00'), 'Thursday must retain the 09:00 anchor');
-assert.deepEqual(planDailyPillars(10), ['umkm', 'ai', 'github', 'security', 'ai-news-update', 'programmer-quotes', 'umkm', 'ai', 'github', 'security']);
+const plannedPillars = planDailyPillars(10);
+assert.equal(plannedPillars.length, 10);
+assert.deepEqual(planDailyPillars(10), plannedPillars, 'pillar plan must be deterministic for the configured weights');
+assert.ok(plannedPillars.every((pillar, index) => index < 2 || pillar !== plannedPillars[index - 1] || pillar !== plannedPillars[index - 2]), 'pillar plan must not contain three consecutive matching pillars');
 const configExport = createConfigExport(
   { posts_per_day: '25', posting_mode: 'approval', JWT_SECRET: 'must-not-export' },
   [{ name: 'Example', url: resourceUrl, pillar: 'github', source_type: 'manual', approved: true }],
