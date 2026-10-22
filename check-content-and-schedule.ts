@@ -44,6 +44,18 @@ assert.equal(quality.passed, true, quality.reasons.join('; '));
 assert.equal(formatPostText('  Satu   ide.  \r\n\r\n\r\n  Ide lain.  '), 'Satu ide.\n\nIde lain.');
 void readLimitedResponseText(new Response('x'.repeat(150_000))).then(body => assert.equal(body.length, 100_000, 'source body must be capped before cleaning'));
 assert.ok(!quality.reasons.some(reason => reason.includes('CTA engagement bait')));
+const positioningRejected = runQualityGate({
+  text: 'Catatan singkat tentang produktivitas harian tanpa topik implementasi.',
+  replies: [], keywords: [], requiredKeywords: [], sourceUrls: [], postType: 'education', softSelling: false,
+  requireAccountPositioning: true,
+});
+assert.ok(positioningRejected.reasons.some(reason => reason.includes('positioning akun')));
+const unverifiedOutcomeRejected = runQualityGate({
+  text: 'Klien saya omzet naik setelah proyek ini selesai.',
+  replies: [], keywords: [], requiredKeywords: [], sourceUrls: [], postType: 'education', softSelling: false,
+  rejectUnverifiedOutcomeClaims: true,
+});
+assert.ok(unverifiedOutcomeRejected.reasons.some(reason => reason.includes('Klaim hasil')));
 assert.equal(sourceResponseHealth({ id: 1, name: 'repo', url: resourceUrl, source_type: 'github' }, 403), 'transient');
 assert.equal(sourceResponseHealth({ id: 2, name: 'page', url: 'https://example.com/', source_type: 'web' }, 403), 'dead');
 

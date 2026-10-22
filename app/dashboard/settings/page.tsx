@@ -205,6 +205,8 @@ export default function SettingsPage() {
   };
 
   const activeDays = settings.active_days ? JSON.parse(settings.active_days) : [1, 2, 3, 4, 5, 6, 0];
+  const minimumGap = Math.min(120, Math.max(5, Number(settings.minimum_post_gap_minutes || '20')));
+  const capacity = Math.max(0, Math.floor((((Number(settings.active_hours_end || '20') - Number(settings.active_hours_start || '8')) * 60) - 20) / minimumGap) + 1);
 
   useEffect(() => {
     let active = true;
@@ -268,7 +270,7 @@ export default function SettingsPage() {
 
       <div className="bg-white rounded-lg border p-6 mb-6">
         <h2 className="font-semibold text-lg mb-4">{ui('Posting Schedule')}</h2>
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
           <div>
             <label className="block text-sm font-medium mb-1">{ui('Posts per day')}</label>
             <input
@@ -297,6 +299,15 @@ export default function SettingsPage() {
             />
           </div>
           <div>
+            <label className="block text-sm font-medium mb-1">{locale === 'en' ? 'Minimum post gap (minutes)' : 'Jarak minimum post (menit)'}</label>
+            <input
+              type="number" min="5" max="120"
+              value={settings.minimum_post_gap_minutes || '20'}
+              onChange={(e) => handleUpdate('minimum_post_gap_minutes', e.target.value)}
+              className="w-full px-3 py-2 border rounded-md"
+            />
+          </div>
+          <div>
             <label className="block text-sm font-medium mb-1">{ui('Timezone')}</label>
             <input
               type="text"
@@ -306,6 +317,7 @@ export default function SettingsPage() {
             />
           </div>
         </div>
+        <p className="mt-3 text-sm text-gray-600">{locale === 'en' ? `Maximum ${capacity} root posts/day at least ${minimumGap} minutes apart.` : `Maksimum ${capacity} root post/hari dengan jarak minimal ${minimumGap} menit.`}</p>
 
         <div className="mt-4">
           <label className="block text-sm font-medium mb-2">{ui('Active days')}</label>
