@@ -23,7 +23,7 @@
 </p>
 
 <p align="center">
-  <img alt="Release v0.2.0" src="https://img.shields.io/badge/release-v0.2.0-f97316.svg">
+  <img alt="Release v0.3.1" src="https://img.shields.io/badge/release-v0.3.1-f97316.svg">
   <img alt="License Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-2563eb.svg">
   <img alt="Node.js 22 or newer" src="https://img.shields.io/badge/node.js-22%2B-339933.svg">
   <img alt="SQLite storage" src="https://img.shields.io/badge/storage-SQLite-003B57.svg">
@@ -65,6 +65,7 @@ The main product interface is the authenticated **Threads Auto Poster dashboard*
 - Content pillars with active-weight normalization to a total of 100%.
 - Content compositions for hook, structure, CTA, source-link, language, and length rules.
 - Source-aware content preparation with fallback and retry classification.
+- Repository-required pillars try other approved GitHub repositories when one source is temporarily unavailable; they still fail closed when no valid repository remains.
 - Post history and audit records for operational review.
 
 ### Threads content workflow
@@ -74,6 +75,14 @@ The main product interface is the authenticated **Threads Auto Poster dashboard*
 - Configurable posts per day, active hours, timezone, active days, and minimum gaps.
 - Approval mode and kill switch protect the first installation.
 - Threads OAuth connection with encrypted token storage in SQLite.
+
+### Threads Reply Agent
+
+- Optional reply discovery, draft generation, review, approval, publishing, analytics, and audit trail in **Dashboard → Replies**.
+- Disabled by default; publishing stays approval-only until an operator explicitly enables the agent and auto mode.
+- Per-account policy is configurable: `once` allows one durable reply per target account; `continuations_only` permits later replies only when that same account directly replies to one of this account's recorded replies.
+- Reply publishing uses an atomic claim, rechecks limits after the claim, verifies the published reply, and never blindly retries `publish_unknown`.
+- Keyword search and profile discovery depend on Meta app capability and OAuth permission. The UI reports the official API result; it does not scrape Threads or use browser automation.
 
 ### AI-assisted content generation
 
@@ -225,7 +234,15 @@ To publish to Threads, create a Threads app in Meta for Developers, configure th
 https://your-domain.example/api/auth/threads/callback
 ```
 
-Use **Credentials / Kredensial → Connect Threads** to complete OAuth. The returned token is encrypted before it is stored in SQLite. See [Getting Started](docs/GETTING_STARTED.md) for the required Meta permissions and setup order.
+Use **Credentials / Kredensial → Connect Threads** to complete OAuth. The returned token is encrypted before it is stored in SQLite. The normal connect flow requests the base publishing scopes.
+
+For Reply Agent discovery, use **Reconnect** from Credentials or the explicit URL below so OAuth requests the optional discovery scopes:
+
+```text
+https://your-domain.example/api/auth/threads/connect?reply=1
+```
+
+Meta must also grant Keyword Search/Profile Discovery capability to the same app and testing account. A successful reconnect can enable reply publish/quota while discovery remains unavailable; use **Dashboard → Replies → Probe capability** to see the official result. The Credentials page also provides **Disconnect** to remove only the local encrypted token before connecting a different account; it does not revoke the token at Meta.
 
 Live Threads posting is intentionally not part of automated repository acceptance. Test with approval mode and an account you control before enabling automatic publishing.
 
@@ -254,6 +271,8 @@ Keep `.env.local`, `data/`, and backups outside Git. The restore path requires e
 - Source URLs must use HTTPS and cannot point to localhost, private, or link-local addresses.
 - Generated content must cite approved sources and pass quality checks before scheduling or publishing.
 - A `publish_unknown` result is not auto-retried because the platform may already have accepted the post.
+- Reply Agent defaults to disabled and approval-only. Raising a daily account limit does not bypass the configured per-account reply policy.
+- Discovery remains disabled by capability when Meta rejects its official API permission; no scraping or browser automation fallback is used.
 - Config export excludes tokens, password hashes, users, kill-switch state, history, generated posts, and runtime database rows.
 - The dashboard never performs a destructive self-update from a browser request.
 - Public release defaults do not contain production credentials, private endpoints, account secrets, or runtime databases.
