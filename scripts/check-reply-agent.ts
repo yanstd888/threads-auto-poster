@@ -19,7 +19,7 @@ async function main() {
     const { buildAuthorizeUrl } = await import('../lib/threads-oauth');
     const { captureReplySnapshots } = await import('../lib/reply-analytics');
     const { publishReplyCandidate } = await import('../lib/reply-publish');
-    const { postReplyToThreads } = await import('../lib/threads-api');
+    const { disconnectThreads, getToken, postReplyToThreads, saveToken } = await import('../lib/threads-api');
 
   initDB();
   const db = getDb();
@@ -37,16 +37,22 @@ async function main() {
   setSetting('reply_relevance_threshold', '80');
   const originalAppId = process.env.THREADS_APP_ID;
   const originalAppSecret = process.env.THREADS_APP_SECRET;
+  const originalTokenEncryptionKey = process.env.TOKEN_ENCRYPTION_KEY;
   process.env.THREADS_APP_ID = 'reply-agent-check-app';
   process.env.THREADS_APP_SECRET = 'reply-agent-check-secret';
+  process.env.TOKEN_ENCRYPTION_KEY = '12345678901234567890123456789012';
   const baseOAuth = new URL(buildAuthorizeUrl('state', {})!);
   const replyOAuth = new URL(buildAuthorizeUrl('state', { includeReplyDiscovery: true })!);
   assert.equal(baseOAuth.searchParams.get('scope'), 'threads_basic,threads_content_publish,threads_manage_insights,threads_manage_replies');
   assert.match(replyOAuth.searchParams.get('scope') || '', /threads_keyword_search/);
   assert.match(replyOAuth.searchParams.get('scope') || '', /threads_profile_discovery/);
   assert.match(replyOAuth.searchParams.get('scope') || '', /threads_read_replies/);
+  saveToken('threads', 'check-token');
+  disconnectThreads();
+  assert.ok('error' in getToken('threads'));
   if (originalAppId === undefined) delete process.env.THREADS_APP_ID; else process.env.THREADS_APP_ID = originalAppId;
   if (originalAppSecret === undefined) delete process.env.THREADS_APP_SECRET; else process.env.THREADS_APP_SECRET = originalAppSecret;
+  if (originalTokenEncryptionKey === undefined) delete process.env.TOKEN_ENCRYPTION_KEY; else process.env.TOKEN_ENCRYPTION_KEY = originalTokenEncryptionKey;
 
   const targetResult = addReplyTarget({
     target_type: 'keyword',

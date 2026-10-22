@@ -1,4 +1,4 @@
-import { getDb, getSetting, logAudit } from './db';
+import { getDb, getSetting, logAudit, setSetting } from './db';
 import { refreshLongLivedToken } from './threads-oauth';
 import crypto from 'crypto';
 
@@ -43,6 +43,13 @@ export function saveToken(service: string, token: string, expiresAt?: number) {
 
   // Also save username if provided via settings
   // ponytail: threads_username stored in settings table
+}
+
+export function disconnectThreads(): void {
+  const db = getDb();
+  db.prepare('DELETE FROM tokens WHERE id = ?').run('threads_main');
+  setSetting('threads_username', '');
+  logAudit('threads_disconnected', 'local token removed');
 }
 
 export function getToken(service: string): { token: string; expiresAt?: number } | { error: string } {
