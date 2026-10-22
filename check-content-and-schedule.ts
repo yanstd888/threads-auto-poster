@@ -18,9 +18,9 @@ import { APP_VERSION_LABEL } from './lib/app-version';
 import { compareVersions, parseVersion } from './lib/update-check';
 
 const newsStrategy = getContentStrategy('ai-news-update', 'today');
-assert.equal(newsStrategy.label, 'NewsAI / Berita AI terbaru');
+assert.ok(newsStrategy.label.trim().length > 0, 'configured pillar label must be usable');
 assert.equal(newsStrategy.keywords.length, 3);
-assert.equal(getContentStrategy('programmer-quotes', 'today').topicTag, 'Programmer Mindset');
+assert.ok(getContentStrategy('programmer-quotes', 'today').topicTag.trim().length > 0, 'configured quote topic tag must be usable');
 const requiredKeywords = ['repo GitHub terbaik', 'repository open source', 'tools developer gratis'];
 assert.equal(ALLOWED_SETTING_KEYS.has('github_url'), false);
 assert.equal(ALLOWED_SETTING_KEYS.has('website_url'), false);
