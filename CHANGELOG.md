@@ -2,6 +2,14 @@
 
 All notable project changes are recorded here.
 
+## 0.3.3 - 2026-10-23
+
+### Fixed
+
+- Add the minimum root-post gap control and computed daily-capacity hint to the settings UI.
+- Enforce Reply Agent activation safeguards: explicit auto-mode confirmation, active-target requirement, and reply schedule validation.
+- Enforce account-positioning and unverified-outcome guards in the shared root-content quality gate.
+
 ## 0.3.2 - 2026-10-23
 
 ### Fixed

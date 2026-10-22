@@ -21,6 +21,8 @@ export interface PostContent {
   promoReason?: string;
   promoWebsiteUrl?: string;
   language?: 'id' | 'en';
+  requireAccountPositioning?: boolean;
+  rejectUnverifiedOutcomeClaims?: boolean;
 }
 
 const HASHTAG_PATTERN = /#[\p{L}\p{N}_]+/gu;
@@ -49,6 +51,14 @@ export function runQualityGate(content: PostContent, recentPosts: string[] = [])
   const mainText = content.text.trim();
   const fullText = `${mainText} ${(content.replies || []).join(' ')}`.trim();
   const hook = firstSentence(mainText);
+  if (content.requireAccountPositioning && !hasAccountPositioning(fullText)) {
+    reasons.push('Konten harus menyambung ke positioning akun: pekerjaan UMKM/builder dengan AI, automation, atau website');
+    score -= 100;
+  }
+  if (content.rejectUnverifiedOutcomeClaims && hasUnverifiedOutcomeClaim(fullText)) {
+    reasons.push('Klaim hasil, klien, testimoni, pendapatan, atau konversi tanpa bukti terverifikasi dilarang');
+    score -= 100;
+  }
   if (content.standaloneOnly && content.replies.some(Boolean)) {
     reasons.push('Konten harus mandiri dalam satu post; balasan thread tidak dipakai');
     score -= 100;
@@ -350,6 +360,21 @@ function hasHookSignal(hook: string, language: 'id' | 'en' = 'id'): boolean {
     /\b(menurut|berdasarkan|data|laporan|catatan|dokumentasi|riset|studi)\b/i,
     /\b(ini yang|yang sering|yang bikin|yang membuat|alasannya|dampaknya|hasilnya)\b/i,
   ].some(pattern => pattern.test(hook));
+}
+
+function hasAccountPositioning(text: string): boolean {
+  const appliedTopic = /\b(?:ai|automation|otomasi|website|web|landing page|seo|coding|developer|deploy|agent)\b/i.test(text);
+  const audience = /\b(?:umkm|usaha|bisnis|toko|pemilik|builder|developer|tim|freelance|klien)\b/i.test(text);
+  return appliedTopic && audience;
+}
+
+function hasUnverifiedOutcomeClaim(text: string): boolean {
+  return [
+    /\b(?:klien|client|customer)\s+(?:kami|saya|aku)\b/i,
+    /\b(?:proyek|project)\s+(?:kami|saya|aku)\b/i,
+    /\b(?:omzet|revenue|pendapatan|konversi|conversion)\b.{0,32}\b(?:naik|turun|meningkat|bertambah|hasil)\b/i,
+    /\b(?:testimonial|testimoni)\b/i,
+  ].some(pattern => pattern.test(text));
 }
 
 function countNaturalQuestionCtas(text: string): number {
