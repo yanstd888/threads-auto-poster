@@ -16,6 +16,11 @@ import { applyConfigImport, createConfigExport, validateConfigImport } from './l
 import { ALLOWED_SETTING_KEYS } from './lib/settings-validation';
 import { APP_VERSION_LABEL } from './lib/app-version';
 import { compareVersions, parseVersion } from './lib/update-check';
+import { humanizerLintPassed } from './lib/humanizer-lint';
+
+const humanizerPass = { status: 'PASS' as const, score: 100, language: 'id', violations: [], suppressed: 0, version: '1.5.1' };
+assert.equal(humanizerLintPassed(humanizerPass), true);
+assert.equal(humanizerLintPassed({ ...humanizerPass, status: 'FAIL', violations: ['finding'] }), false);
 
 const newsStrategy = getContentStrategy('ai-news-update', 'today');
 assert.ok(newsStrategy.label.trim().length > 0, 'configured pillar label must be usable');

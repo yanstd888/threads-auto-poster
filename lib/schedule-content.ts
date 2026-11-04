@@ -1,5 +1,5 @@
 import { randomInt } from 'node:crypto';
-import { getDb, getSetting } from './db';
+import { getDb, getSetting, logAudit } from './db';
 import { getContentStrategy } from './content-strategy';
 import { getContentPillar } from './content-pillars';
 import { getContentComposition } from './content-compositions';
@@ -9,6 +9,7 @@ import { ensureNaturalQuestionCta, formatPostText, normalizePillarHashtags, runQ
 import { fetchCurrentSourceContext, getApprovedSources, type ApprovedSource } from './source-context';
 import { THREADS_LIMITS } from './threads-api';
 import { OFFICIAL_STORE_URL } from './brand-links';
+import { rewriteUntilHuman } from './humanizer-lint';
 
 type ContentSlot = { id?: number; pillar: string; post_type: 'education' | 'promotion'; slot_time: number; retry_count?: number };
 
@@ -112,6 +113,33 @@ async function createStoredPost(slot: ContentSlot, reservationId: number, passed
     const normalizedHashtags = normalizePillarHashtags(generated.text, generated.replies, slot.pillar);
     generated.text = normalizedHashtags.text;
     generated.replies = normalizedHashtags.replies;
+
+    const humanized = await rewriteUntilHuman({
+      text: generated.text,
+      replies: generated.replies,
+      pillar: slot.pillar,
+      postType: slot.post_type,
+      language: contentLocale,
+      maxLength: Math.min(THREADS_LIMITS.TEXT_LIMIT, composition.max_length),
+      sourceUrls: sourceContext.urls,
+      requiredResourceUrl,
+      promoWebsiteUrl,
+    }, post => {
+      const formatted = {
+        text: formatPostText(post.text),
+        replies: post.replies.map(formatPostText),
+      };
+      const cta = ensureNaturalQuestionCta(formatted.text, formatted.replies, strategy.ctaMechanism, contentLocale);
+      const split = splitOverlongThreadParts(cta.text, cta.replies);
+      return normalizePillarHashtags(split.text, split.replies, slot.pillar);
+    });
+    if (humanized.error) {
+      logAudit('humanizer_failed', `pillar=${slot.pillar} type=${slot.post_type} rewrites=${humanized.rewrites} error=${humanized.error}`);
+      return { error: `humanizer_failed: ${humanized.error}` };
+    }
+    generated.text = humanized.text;
+    generated.replies = humanized.replies;
+    logAudit('humanizer_passed', `pillar=${slot.pillar} type=${slot.post_type} version=${humanized.report.version} score=${humanized.report.score ?? 'null'} rewrites=${humanized.rewrites} suppressed=${humanized.report.suppressed}`);
 
     const quality = runQualityGate({
     text: generated.text,
