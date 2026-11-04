@@ -2,9 +2,16 @@
 
 All notable project changes are recorded here.
 
-## 0.3.3 - 2026-10-23
+## 0.3.4 - 2026-11-04
+
+### Changed
+
+- Route every unpublished Threads draft through the local humanizer-lint 1.5.1 analyzer before publication.
+- Persist the humanized draft at the publish boundary, while leaving posts with an existing Threads ID untouched.
 
 ### Fixed
+
+- Block publication when the humanizer analyzer, rewrite, post-quality recheck, or persistence step fails.
 
 - Add the minimum root-post gap control and computed daily-capacity hint to the settings UI.
 - Enforce Reply Agent activation safeguards: explicit auto-mode confirmation, active-target requirement, and reply schedule validation.
