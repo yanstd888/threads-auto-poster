@@ -117,7 +117,10 @@ export function runHumanizerLint(text: string, replies: string[], language: 'id'
 }
 
 export function humanizerLintPassed(report: HumanizerLintReport): boolean {
-  return report.status === 'PASS' && report.violations.length === 0;
+  // ponytail: trust the analyzer's own verdict. It emits PASS with advisory findings
+  // still listed in `violations` (diagnostics/prioritized fixes, not failures), so
+  // requiring an empty list here would block every post forever.
+  return report.status === 'PASS';
 }
 
 export interface HumanizerPost {

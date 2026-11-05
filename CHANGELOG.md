@@ -2,6 +2,15 @@
 
 All notable project changes are recorded here.
 
+## 0.3.5 - 2026-11-05
+
+### Fixed
+
+- Restore publishing after the humanizer gate shipped: the rewrite prompt made the agent explore the humanizer-lint workflow with tools instead of answering, so every post was blocked and nothing published.
+- Accept the analyzer's own PASS verdict: it lists advisory findings in `violations` even when it returns PASS, and requiring an empty list blocked every post.
+- Cap the humanizer rewrite CLI call to a single turn and keep its stdout when the CLI exits non-zero after printing valid JSON.
+- Raise the Hermes readiness-probe timeout from 45s to 180s so a cold model start no longer marks the agent as crashed.
+
 ## 0.3.4 - 2026-11-04
 
 ### Changed

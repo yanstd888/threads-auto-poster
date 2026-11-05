@@ -80,6 +80,7 @@ const activeHermesChildren = new Map<number, ChildProcess>();
 const HERMES_BIN = process.env.HERMES_BIN ||
   process.env.HERMES_BIN_PATH ||
   (process.platform === 'win32' ? 'hermes.exe' : 'hermes');
+const HERMES_PREFLIGHT_TIMEOUT_MS = 180_000;
 const HERMES_READY_TTL_MS = 5 * 60 * 1000;
 const HERMES_FAILED_READY_TTL_MS = 60 * 1000;
 let readinessCache: { key: string; error: string | null; expiresAt: number } | null = null;
@@ -147,7 +148,7 @@ export async function invokeHermesHumanizerRewrite(req: HumanizerRewriteRequest)
   try {
     for (let attempt = 0; attempt < 2; attempt += 1) {
       const retryPrompt = attempt === 0 ? prompt : `${prompt}\nFORMAT RETRY: kirim tepat satu objek JSON valid dengan text dan replies, tanpa markdown.`;
-      const result = await runHermesCli(retryPrompt, config, 240_000);
+      const result = await runHermesCli(retryPrompt, config, 240_000, HUMANIZER_REWRITE_CLI_OPTIONS);
       const parsed = parseHumanizerRewriteOutput(stripHermesOutput(result.stdout));
       if (!parsed.error) {
         logAudit('humanizer_rewrite_response', `success length=${parsed.text.length} replies=${parsed.replies.length} format_attempt=${attempt + 1}`);
@@ -209,7 +210,7 @@ export async function verifyHermesAgent(config = resolveHermesInvocationConfig()
   const now = Date.now();
   if (readinessCache?.key === key && readinessCache.expiresAt > now) return readinessCache.error;
   if (readinessInFlight?.key === key) return readinessInFlight.promise;
-  const promise = runHermesCli('Return exactly: HERMES_OK', config, 45_000)
+  const promise = runHermesCli('Return exactly: HERMES_OK', config, HERMES_PREFLIGHT_TIMEOUT_MS)
     .then(({ stdout }) => stripHermesOutput(stdout).includes('HERMES_OK') ? null : 'agent_crash: Hermes readiness probe did not return HERMES_OK')
     .catch((error: unknown) => `agent_crash: ${error instanceof Error ? error.message : 'Hermes readiness probe failed'}`)
     .then(error => {
@@ -226,9 +227,30 @@ function emptyHermesResponse(req: HermesRequest, error: string): HermesResponse 
   return { text: '', replies: [], pillar: req.pillar, postType: req.postType, keywords: [], sourceUrls: [], error };
 }
 
-function runHermesCli(prompt: string, config: HermesInvocationConfig, timeoutMs: number): Promise<{ stdout: string; stderr: string }> {
+type HermesCliOptions = {
+  extraArgs?: string[];
+  acceptOutputOnNonZeroExit?: boolean;
+};
+
+export function buildHermesCliArgs(config: HermesInvocationConfig, options: HermesCliOptions = {}): string[] {
+  return ['chat', '--query-file', '-', '--oneshot', '--quiet', '--cli', '-m', config.model, '--provider', config.provider, ...(options.extraArgs || [])];
+}
+
+export const HUMANIZER_REWRITE_CLI_OPTIONS: HermesCliOptions = {
+  // ponytail: the rewrite prompt mentions the humanizer-lint workflow, which makes the agent try to run tools; cap turns so it answers JSON instead of exploring.
+  extraArgs: ['--max-turns', '1'],
+  acceptOutputOnNonZeroExit: true,
+};
+
+function runHermesCli(
+  prompt: string,
+  config: HermesInvocationConfig,
+  timeoutMs: number,
+  options: HermesCliOptions = {},
+): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
-    const child = spawn(/* turbopackIgnore: true */ HERMES_BIN, ['chat', '--query-file', '-', '--oneshot', '--quiet', '--cli', '-m', config.model, '--provider', config.provider], { stdio: ['pipe', 'pipe', 'pipe'] });
+    const args = buildHermesCliArgs(config, options);
+    const child = spawn(/* turbopackIgnore: true */ HERMES_BIN, args, { stdio: ['pipe', 'pipe', 'pipe'] });
     trackHermesChild(child);
     let stdout = '';
     let stderr = '';
@@ -241,6 +263,7 @@ function runHermesCli(prompt: string, config: HermesInvocationConfig, timeoutMs:
       clearTimeout(timeout);
       untrackHermesChild(child);
       if (code === 0) resolve({ stdout, stderr });
+      else if (options.acceptOutputOnNonZeroExit && stdout.trim()) resolve({ stdout, stderr });
       else reject(new Error(timedOut ? `Hermes timeout after ${Math.round(timeoutMs / 1000)} seconds` : stderr.trim() || `Process exited with code ${code ?? 'cancelled'}`));
     });
     child.stdin.end(prompt);
